@@ -67,6 +67,9 @@ public class Observing extends State {
         PlayerRespawnEvent event = new PlayerRespawnEvent(player.getBukkit(), location, false);
         player.getMatch().callEvent(event);
 
+        // We should make the observer fly whenever they enter this state or spawn,
+        // especially when maps don't have a platform to spawn in.
+        player.getBukkit().setFlying(true);
         player.getBukkit().teleport(event.getRespawnLocation());
       }
     }

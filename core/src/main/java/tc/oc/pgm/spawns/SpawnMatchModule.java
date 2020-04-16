@@ -284,6 +284,9 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
         if (spawn != null) {
           Location location = spawn.getSpawn(player);
           if (location != null) {
+            // We should make the observer fly whenever they enter this state or spawn,
+            // especially when maps don't have a platform to spawn in.
+            player.getBukkit().setFlying(true);
             player.getBukkit().teleport(location);
           }
         }
