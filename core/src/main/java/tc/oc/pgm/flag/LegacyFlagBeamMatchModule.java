@@ -20,7 +20,6 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.inventory.ItemStack;
-import tc.oc.pgm.api.Config;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
@@ -34,15 +33,14 @@ import tc.oc.pgm.events.PlayerLeaveMatchEvent;
 import tc.oc.pgm.flag.event.FlagStateChangeEvent;
 import tc.oc.pgm.flag.state.Carried;
 import tc.oc.pgm.flag.state.Spawned;
-import tc.oc.pgm.util.bukkit.ViaUtils;
 import tc.oc.pgm.util.inventory.ItemBuilder;
 import tc.oc.pgm.util.nms.NMSHacks;
 
 @ListenerScope(MatchScope.LOADED)
 public class LegacyFlagBeamMatchModule implements MatchModule, Listener {
 
-  private static int UPDATE_DELAY = 0;
-  private static int UPDATE_FREQUENCY = 50;
+  private static final int UPDATE_DELAY = 0;
+  private static final int UPDATE_FREQUENCY = 50;
 
   private UpdateTask task;
   private final Match match;
@@ -51,13 +49,6 @@ public class LegacyFlagBeamMatchModule implements MatchModule, Listener {
   public LegacyFlagBeamMatchModule(Match match) {
     this.match = match;
     this.beams = new HashMap<>();
-  }
-
-  private boolean shouldShowBeams(Flag flag) {
-    FlagDefinition definition = flag.getDefinition();
-    Config configuration = PGM.get().getConfiguration();
-    return definition.showBeam() // considers the flag definition's flag beam setting.
-        && configuration.shouldShowLegacyFlagBeamsGlobally();
   }
 
   protected Stream<Flag> flags() {
@@ -82,11 +73,10 @@ public class LegacyFlagBeamMatchModule implements MatchModule, Listener {
     Map<Flag, Beam> flags = beams.containsKey(player) ? beams.get(player) : new HashMap<>();
     if (flags.containsKey(flag) // beam duplication check
         || !flag.getDefinition().showBeam() // considers the flag definition's flag beam setting.
-        || (ViaUtils.getProtocolVersion(player.getBukkit())
-                > ViaUtils.VERSION_1_7 // version greater than 1.7 &
+        || (!player.isLegacy() // version greater than 1.7 &
             && !PGM.get()
                 .getConfiguration()
-                .shouldShowLegacyFlagBeamsGlobally())) { // we shouldn't show to >1.7 players
+                .useLegacyFlagBeams())) { // we shouldn't show to >1.7 players
       return;
     }
 

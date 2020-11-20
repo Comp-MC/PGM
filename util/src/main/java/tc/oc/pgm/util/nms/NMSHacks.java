@@ -42,6 +42,12 @@ public interface NMSHacks {
     return getTrackerEntry(((CraftEntity) entity).getHandle());
   }
 
+  static void sendPacket(Object packet) {
+    for (Player pl : Bukkit.getOnlinePlayers()) {
+      sendPacket(pl, packet);
+    }
+  }
+
   static void sendPacket(Player bukkitPlayer, Object packet) {
     if (bukkitPlayer.isOnline()) {
       EntityPlayer nmsPlayer = ((CraftPlayer) bukkitPlayer).getHandle();
@@ -61,10 +67,10 @@ public interface NMSHacks {
       PacketPlayOutPlayerInfo packet,
       UUID uuid,
       String name,
-      @Nullable BaseComponent displayName,
       GameMode gamemode,
       int ping,
-      @Nullable Skin skin) {
+      @Nullable Skin skin,
+      @Nullable BaseComponent... displayName) {
     GameProfile profile = new GameProfile(uuid, name);
     if (skin != null) {
       for (Map.Entry<String, Collection<Property>> entry :
@@ -78,18 +84,46 @@ public interface NMSHacks {
             ping,
             gamemode == null ? null : WorldSettings.EnumGamemode.getById(gamemode.getValue()),
             null); // ELECTROID
-    data.displayName = displayName == null ? null : new BaseComponent[] {displayName};
+    data.displayName = displayName == null || displayName.length == 0 ? null : displayName;
     return data;
   }
 
   static PacketPlayOutPlayerInfo.PlayerInfoData playerListPacketData(
-      PacketPlayOutPlayerInfo packet, UUID uuid, BaseComponent displayName) {
-    return playerListPacketData(packet, uuid, null, displayName, null, 0, null);
+      PacketPlayOutPlayerInfo packet, UUID uuid, BaseComponent... displayName) {
+    return playerListPacketData(
+        packet, uuid, "|" + uuid.toString().substring(0, 15), null, 0, null, displayName);
   }
 
   static PacketPlayOutPlayerInfo.PlayerInfoData playerListPacketData(
       PacketPlayOutPlayerInfo packet, UUID uuid) {
-    return playerListPacketData(packet, uuid, null, null, null, 0, null);
+    return playerListPacketData(packet, uuid, null, null, 0, null);
+  }
+
+  static PacketPlayOutPlayerInfo.PlayerInfoData playerListPacketData(
+      PacketPlayOutPlayerInfo packet, UUID uuid, int ping) {
+    return playerListPacketData(packet, uuid, uuid.toString().substring(0, 16), null, ping, null);
+  }
+
+  /**
+   * Removes all players from the tab for the viewer and re-adds them
+   *
+   * @param viewer The viewer to send the packets to
+   */
+  static void removeAndAddAllTabPlayers(Player viewer) {
+    List<EntityPlayer> players = new ArrayList<>();
+    for (Player player : Bukkit.getOnlinePlayers()) {
+      if (viewer.canSee(player) || player == viewer)
+        players.add(((CraftPlayer) player).getHandle());
+    }
+
+    sendPacket(
+        viewer,
+        new PacketPlayOutPlayerInfo(
+            PacketPlayOutPlayerInfo.EnumPlayerInfoAction.REMOVE_PLAYER, players));
+    sendPacket(
+        viewer,
+        new PacketPlayOutPlayerInfo(
+            PacketPlayOutPlayerInfo.EnumPlayerInfoAction.ADD_PLAYER, players));
   }
 
   static Packet teamPacket(
@@ -143,6 +177,25 @@ public interface NMSHacks {
 
   static Packet teamRemovePacket(String name) {
     return teamPacket(1, name, null, null, null, false, false, null, Lists.<String>newArrayList());
+  }
+
+  static Packet teamUpdatePacket(
+      String name,
+      String displayName,
+      String prefix,
+      String suffix,
+      boolean friendlyFire,
+      boolean seeFriendlyInvisibles) {
+    return teamPacket(
+        2,
+        name,
+        displayName,
+        prefix,
+        suffix,
+        friendlyFire,
+        seeFriendlyInvisibles,
+        NameTagVisibility.ALWAYS,
+        Lists.newArrayList());
   }
 
   static Packet teamJoinPacket(String name, Collection<String> players) {
@@ -458,6 +511,10 @@ public interface NMSHacks {
 
   static int getProtocolVersion(Player player) {
     return ((CraftPlayer) player).getHandle().playerConnection.networkManager.protocolVersion;
+  }
+
+  static int getPing(Player player) {
+    return ((CraftPlayer) player).getHandle().ping;
   }
 
   static Packet setPassengerPacket(int riderId, int vehicleId) {

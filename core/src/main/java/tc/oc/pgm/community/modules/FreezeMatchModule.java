@@ -12,6 +12,8 @@ import javax.annotation.Nullable;
 import net.kyori.text.Component;
 import net.kyori.text.TextComponent;
 import net.kyori.text.TranslatableComponent;
+import net.kyori.text.event.ClickEvent;
+import net.kyori.text.event.HoverEvent;
 import net.kyori.text.format.TextColor;
 import net.md_5.bungee.api.ChatColor;
 import org.bukkit.Bukkit;
@@ -336,18 +338,16 @@ public class FreezeMatchModule implements MatchModule, Listener {
       if (!silent) {
         freezeTitle.append(" ").append(by);
       }
-
-      freezee.showTitle(
-          TextComponent.empty(), freezeTitle.color(TextColor.RED).build(), 5, 9999, 5);
+      Component title = freezeTitle.color(TextColor.RED).build();
+      if (freezee.isLegacy()) {
+        freezee.sendWarning(title);
+      } else {
+        freezee.showTitle(TextComponent.empty(), title, 5, 9999, 5);
+      }
       freezee.playSound(FREEZE_SOUND);
 
       ChatDispatcher.broadcastAdminChatMessage(
-          TranslatableComponent.of(
-              "moderation.freeze.broadcast.frozen",
-              TextColor.GRAY,
-              senderName,
-              freezee.getName(NameStyle.CONCISE)),
-          match);
+          createInteractiveBroadcast(senderName, freezee, true), match);
     }
 
     private void thaw(MatchPlayer freezee, Component senderName, boolean silent) {
@@ -366,12 +366,23 @@ public class FreezeMatchModule implements MatchModule, Listener {
       freezee.sendMessage(thawedTitle.color(TextColor.GREEN).build());
 
       ChatDispatcher.broadcastAdminChatMessage(
-          TranslatableComponent.of(
-              "moderation.freeze.broadcast.thaw",
-              TextColor.GRAY,
-              senderName,
-              freezee.getName(NameStyle.CONCISE)),
-          match);
+          createInteractiveBroadcast(senderName, freezee, false), match);
+    }
+
+    private Component createInteractiveBroadcast(
+        Component senderName, MatchPlayer freezee, boolean frozen) {
+      return TextComponent.builder()
+          .append(
+              TranslatableComponent.of(
+                  String.format("moderation.freeze.broadcast.%s", frozen ? "frozen" : "thaw"),
+                  TextColor.GRAY,
+                  senderName,
+                  freezee.getName(NameStyle.CONCISE)))
+          .hoverEvent(
+              HoverEvent.showText(
+                  TranslatableComponent.of("moderation.freeze.broadcast.hover", TextColor.GRAY)))
+          .clickEvent(ClickEvent.runCommand("/f " + freezee.getBukkit().getName()))
+          .build();
     }
 
     // Borrowed from WorldEdit

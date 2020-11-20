@@ -77,8 +77,8 @@ import tc.oc.pgm.modules.MobsModule;
 import tc.oc.pgm.modules.ModifyBowProjectileMatchModule;
 import tc.oc.pgm.modules.ModifyBowProjectileModule;
 import tc.oc.pgm.modules.MultiTradeMatchModule;
+import tc.oc.pgm.modules.ProjectileTrailMatchModule;
 import tc.oc.pgm.modules.SoundsMatchModule;
-import tc.oc.pgm.modules.StatsMatchModule;
 import tc.oc.pgm.modules.TimeLockModule;
 import tc.oc.pgm.modules.ToolRepairMatchModule;
 import tc.oc.pgm.modules.ToolRepairModule;
@@ -107,6 +107,7 @@ import tc.oc.pgm.spawner.SpawnerModule;
 import tc.oc.pgm.spawns.SpawnMatchModule;
 import tc.oc.pgm.spawns.SpawnModule;
 import tc.oc.pgm.start.StartMatchModule;
+import tc.oc.pgm.stats.StatsMatchModule;
 import tc.oc.pgm.teams.TeamMatchModule;
 import tc.oc.pgm.teams.TeamModule;
 import tc.oc.pgm.timelimit.TimeLimitMatchModule;
@@ -159,6 +160,10 @@ public interface Modules {
     register(FireworkMatchModule.class, FireworkMatchModule::new);
     register(StatsMatchModule.class, StatsMatchModule::new);
     register(MapmakerMatchModule.class, MapmakerMatchModule::new);
+    register(ProjectileTrailMatchModule.class, ProjectileTrailMatchModule::new);
+
+    // Modules that help older player versions
+    register(LegacyFlagBeamMatchModule.class, LegacyFlagBeamMatchModule::new);
 
     // Modules that depend help older player versions
     register(LegacyFlagBeamMatchModule.class, LegacyFlagBeamMatchModule::new);

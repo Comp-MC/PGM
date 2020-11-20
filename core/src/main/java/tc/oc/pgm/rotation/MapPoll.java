@@ -45,13 +45,15 @@ public class MapPoll {
 
   private final WeakReference<Match> match;
   private final Map<MapInfo, Double> mapScores;
+  private final Set<MapInfo> overrides;
   private final int voteSize;
 
   private final Map<MapInfo, Set<UUID>> votes = new HashMap<>();
 
-  MapPoll(Match match, Map<MapInfo, Double> mapScores, int voteSize) {
+  MapPoll(Match match, Map<MapInfo, Double> mapScores, Set<MapInfo> overrides, int voteSize) {
     this.match = new WeakReference<>(match);
     this.mapScores = mapScores;
+    this.overrides = overrides;
     this.voteSize = voteSize;
 
     selectMaps();
@@ -68,7 +70,10 @@ public class MapPoll {
     NavigableMap<Double, MapInfo> cumulativeScores = new TreeMap<>();
     double maxWeight = cummulativeMap(0, sortedDist, cumulativeScores);
 
-    for (int i = 0; i < voteSize; i++) {
+    // Add all override maps before selecting random
+    overrides.forEach(map -> votes.put(map, new HashSet<>()));
+
+    for (int i = overrides.size(); i < voteSize; i++) {
       NavigableMap<Double, MapInfo> subMap =
           cumulativeScores.tailMap(Math.random() * maxWeight, true);
       Map.Entry<Double, MapInfo> selected = subMap.pollFirstEntry();
@@ -137,19 +142,27 @@ public class MapPoll {
   }
 
   public void sendBook(MatchPlayer viewer, boolean forceOpen) {
-    String title = ChatColor.GOLD + "" + ChatColor.BOLD;
-    title += TextTranslations.translate("vote.title.map", viewer.getBukkit());
+    if (viewer.isLegacy()) {
+      // Must use separate sendMessages, since 1.7 clients do not like the newline character
+      viewer.sendMessage(TranslatableComponent.of("vote.header.map", TextColor.DARK_PURPLE));
+      for (MapInfo pgmMap : votes.keySet()) viewer.sendMessage(getMapBookComponent(viewer, pgmMap));
+      return;
+    }
+
+    TextComponent.Builder content = TextComponent.builder();
+    content.append(TranslatableComponent.of("vote.header.map", TextColor.DARK_PURPLE));
+    content.append(TextComponent.newline());
+
+    for (MapInfo pgmMap : votes.keySet())
+      content.append(TextComponent.newline()).append(getMapBookComponent(viewer, pgmMap));
 
     ItemStack is = new ItemStack(Material.WRITTEN_BOOK);
     BookMeta meta = (BookMeta) is.getItemMeta();
     meta.setAuthor("PGM");
+
+    String title = ChatColor.GOLD + "" + ChatColor.BOLD;
+    title += TextTranslations.translate("vote.title.map", viewer.getBukkit());
     meta.setTitle(title);
-
-    TextComponent.Builder content = TextComponent.builder();
-    content.append(TranslatableComponent.of("vote.header.map", TextColor.DARK_PURPLE));
-    content.append(TextComponent.of("\n\n"));
-
-    for (MapInfo pgmMap : votes.keySet()) content.append(getMapBookComponent(viewer, pgmMap));
 
     NMSHacks.setBookPages(
         meta, TextTranslations.toBaseComponent(content.build(), viewer.getBukkit()));
@@ -174,7 +187,7 @@ public class MapPoll {
             voted ? SYMBOL_VOTED : SYMBOL_IGNORE, voted ? TextColor.DARK_GREEN : TextColor.DARK_RED)
         .append(
             TextComponent.of(" ").decoration(TextDecoration.BOLD, !voted)) // Fix 1px symbol diff
-        .append(map.getName() + "\n", TextColor.GOLD, TextDecoration.BOLD)
+        .append(map.getName(), TextColor.GOLD, TextDecoration.BOLD)
         .hoverEvent(
             HoverEvent.showText(
                 TextComponent.of(

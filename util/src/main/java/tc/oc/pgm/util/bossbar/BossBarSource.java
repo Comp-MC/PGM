@@ -4,7 +4,7 @@ import net.kyori.text.Component;
 import org.bukkit.entity.Player;
 
 /** A retained UI component that renders text and a health amount to the boss bar */
-public interface BossBar {
+public interface BossBarSource {
 
   /**
    * Is this bar currently visible? This is called before every render, and if it returns false, the

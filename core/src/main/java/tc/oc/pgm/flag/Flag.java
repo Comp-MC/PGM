@@ -31,6 +31,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BannerMeta;
 import org.bukkit.util.BlockVector;
 import tc.oc.pgm.api.event.BlockTransformEvent;
+import tc.oc.pgm.api.filter.query.LocationQuery;
 import tc.oc.pgm.api.filter.query.Query;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.module.exception.ModuleLoadException;
@@ -41,7 +42,12 @@ import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.api.region.Region;
 import tc.oc.pgm.flag.event.FlagCaptureEvent;
 import tc.oc.pgm.flag.event.FlagStateChangeEvent;
-import tc.oc.pgm.flag.state.*;
+import tc.oc.pgm.flag.state.BaseState;
+import tc.oc.pgm.flag.state.Captured;
+import tc.oc.pgm.flag.state.Completed;
+import tc.oc.pgm.flag.state.Returned;
+import tc.oc.pgm.flag.state.Spawned;
+import tc.oc.pgm.flag.state.State;
 import tc.oc.pgm.goals.TouchableGoal;
 import tc.oc.pgm.goals.events.GoalCompleteEvent;
 import tc.oc.pgm.goals.events.GoalEvent;
@@ -227,6 +233,11 @@ public class Flag extends TouchableGoal<FlagDefinition> implements Listener {
         || (getDefinition().canDropOnWater() && Materials.isWater(base.getType()));
   }
 
+  public boolean canDrop(LocationQuery query) {
+    return canDropAt(query.getLocation())
+        && getDefinition().getDropFilter().query(query).isAllowed();
+  }
+
   public boolean canDropAt(Location location) {
     Block block = location.getBlock();
     Block below = block.getRelative(BlockFace.DOWN);
@@ -307,11 +318,8 @@ public class Flag extends TouchableGoal<FlagDefinition> implements Listener {
 
   @Override
   public boolean isProximityRelevant(Competitor team) {
-    if (hasTouched(team)) {
-      return canCapture(team.getQuery());
-    } else {
-      return canPickup(team.getQuery());
-    }
+    return getProximityMetric(team) != null
+        && (hasTouched(team) ? canCapture(team.getQuery()) : canPickup(team.getQuery()));
   }
 
   // Misc

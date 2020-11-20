@@ -14,7 +14,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.Map;
@@ -642,6 +641,12 @@ public class MatchImpl implements Match {
   }
 
   @Override
+  public Collection<Competitor> getWinners() {
+    competitors.invalidateRanking();
+    return ImmutableList.copyOf(competitors.getRank(0));
+  }
+
+  @Override
   public void addParty(Party party) {
     logger.fine("Adding party " + party);
     checkNotNull(party);
@@ -708,15 +713,12 @@ public class MatchImpl implements Match {
     @Override
     public void run() {
       final Tick tick = getTick();
-      final Iterator<Tickable> tickables = MatchImpl.this.tickables.get(scope).iterator();
-
-      while (tickables.hasNext()) {
-        final Tickable tickable = tickables.next();
+      for (Tickable tickable : MatchImpl.this.tickables.get(scope)) {
         try {
           tickable.tick(MatchImpl.this, tick);
         } catch (Throwable t) {
           logger.log(Level.SEVERE, "Could not tick " + tickable, t);
-          tickables.remove();
+          tickables.remove(tickable);
         }
       }
     }

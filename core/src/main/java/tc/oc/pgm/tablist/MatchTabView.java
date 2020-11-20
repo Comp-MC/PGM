@@ -4,19 +4,18 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.match.Match;
+import tc.oc.pgm.api.party.Party;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.community.events.PlayerVanishEvent;
 import tc.oc.pgm.events.PlayerJoinMatchEvent;
@@ -24,23 +23,14 @@ import tc.oc.pgm.events.PlayerPartyChangeEvent;
 import tc.oc.pgm.match.ObservingParty;
 import tc.oc.pgm.teams.Team;
 import tc.oc.pgm.teams.TeamMatchModule;
-import tc.oc.pgm.util.bukkit.ViaUtils;
 import tc.oc.pgm.util.tablist.TabEntry;
 import tc.oc.pgm.util.tablist.TabView;
 
-public class MatchTabView extends TabView implements ListeningTabView {
-
-  public static class Factory implements Function<Player, TabView> {
-    @Override
-    public TabView apply(Player key) {
-      return ViaUtils.getProtocolVersion(key) >= ViaUtils.VERSION_1_8
-          ? new MatchTabView(key)
-          : new LegacyMatchTabView(key);
-    }
-  }
+public class MatchTabView extends TabView implements Listener {
 
   private final List<MatchPlayer> observerPlayers = new ArrayList<>();
   private final List<MatchPlayer> participantPlayers = new ArrayList<>();
+  private final List<Team> teams = new ArrayList<>();
   private final ListMultimap<Team, MatchPlayer> teamPlayers = ArrayListMultimap.create();
 
   private Match match;
@@ -51,14 +41,6 @@ public class MatchTabView extends TabView implements ListeningTabView {
 
   public MatchTabView(Player viewer) {
     super(viewer); // All fields must be reset in PlayerJoinMatchEvent to prevent leaks
-  }
-
-  private void addObserver(MatchPlayer observer) {
-    observerPlayers.add(observer);
-  }
-
-  private void removeObserver(MatchPlayer player) {
-    this.observerPlayers.remove(player);
   }
 
   @Override
@@ -74,21 +56,25 @@ public class MatchTabView extends TabView implements ListeningTabView {
   private void renderTeam(
       List<MatchPlayer> players,
       @Nullable TabEntry header,
+      boolean footer,
       boolean vertical,
       final int x1,
       final int x2,
       int y1,
-      final int y2) {
-    if (header != null) {
-      // Render the header row
-      for (int x = x1; x < x2; x++) {
-        this.setSlot(x, y1, x == x1 ? header : null);
-      }
-      y1++;
+      int y2) {
+
+    if (footer && y2 < getHeight()) { // Render an empty row underneath
+      y2 -= 1;
+      for (int x = x1; x < x2; x++) this.setSlot(x, y2, null);
+    }
+
+    if (header != null && y1 < y2) { // Render the header row
+      for (int x = x1; x < x2; x++) this.setSlot(x, y1, x == x1 ? header : null);
+      y1 += 1;
     }
 
     // Re-sort team members and render them
-    Collections.sort(players, this.playerOrder);
+    players.sort(this.playerOrder);
     Iterator<MatchPlayer> iter = players.iterator();
 
     if (vertical) {
@@ -108,135 +94,154 @@ public class MatchTabView extends TabView implements ListeningTabView {
     }
   }
 
+  private void fillEmpty(final int x1, final int x2, final int y1, final int y2) {
+    for (int x = x1; x < x2; x++) {
+      for (int y = y1; y < y2; y++) {
+        this.setSlot(x, y, null);
+      }
+    }
+  }
+
+  public int getHeader() {
+    return display != null ? 2 : 0;
+  }
+
   @Override
   public void render() {
     if (this.manager == null) return;
 
     if (this.match != null && this.isLayoutDirty()) {
-      this.setHeader(this.getManager().getMapEntry(this.match));
-      this.setFooter(this.getManager().getFooterEntry(this.match));
-
-      Collection<MatchPlayer> observers = this.match.getObservers();
+      if (display == null) {
+        this.setHeader(this.getManager().getMapEntry(this.match));
+        this.setFooter(this.getManager().getFooterEntry(this.match));
+      }
 
       // Number of players/staff on observers
       int observingPlayers = 0;
       int observingStaff = 0;
       if (PGM.get().getConfiguration().canParticipantsSeeObservers() || matchPlayer.isObserving()) {
-        observingPlayers =
-            Math.toIntExact(observers.stream().filter(o -> isVisible(o, matchPlayer)).count());
-        for (MatchPlayer player : observers) {
-          if (player.getBukkit().hasPermission(Permissions.STAFF)
-              && !isVisible(player, matchPlayer)) observingStaff++;
+        observingPlayers = observerPlayers.size();
+        for (MatchPlayer player : observerPlayers) {
+          if (player.getBukkit().hasPermission(Permissions.STAFF)) observingStaff++;
         }
       }
 
-      int availableRows = this.getHeight();
-
-      // Minimum rows required to show all staff observers, including a blank row
-      int observerRows =
-          Math.min(availableRows, 1 + divideRoundingUp(observingStaff, this.getWidth()));
+      int availableRows = this.getHeight() - this.getHeader();
+      int observerRows;
 
       if (tmm != null) {
-        // Size of the largest team
-        int maxTeamSize = 0;
-        for (Team team : tmm.getParticipatingTeams()) {
-          maxTeamSize = Math.max(maxTeamSize, team.getPlayers().size());
-        }
+        teams.sort(teamOrder);
 
-        int columnsPerTeam =
-            Math.max(1, this.getWidth() / Math.max(1, tmm.getParticipatingTeams().size()));
+        int participantRows = getMinimumParticipantRows(teams);
+        observerRows = getObserverRows(observingPlayers, observingStaff, participantRows);
+        participantRows = availableRows - observerRows;
 
-        // Minimum rows required by teams (when they are distributed evenly across columns),
-        // including the header row
-        int teamRows =
-            Math.min(
-                availableRows - observerRows, 1 + divideRoundingUp(maxTeamSize, columnsPerTeam));
+        int columnsPerTeam = Math.max(1, this.getWidth() / Math.max(1, teams.size()));
 
-        // Expand observer rows until all observers are showing
-        observerRows =
-            Math.min(
-                availableRows - teamRows, 1 + divideRoundingUp(observingPlayers, this.getWidth()));
-
-        // If there is somehow only one observer row, it's only the blank row, so it might as well
-        // be zero
-        if (observerRows == 1) observerRows = 0;
-
-        // Expand team rows to fill whatever if left
-        teamRows = availableRows - observerRows;
-
-        // Render participating teams
-        List<Team> teams = new ArrayList<>(tmm.getParticipatingTeams());
-        Collections.sort(teams, this.teamOrder);
-        Iterator<Team> iter = teams.iterator();
-
-        for (int x1 = 0; x1 < this.getWidth(); ) {
-          if (iter.hasNext()) {
-            Team team = iter.next();
-            int x2 = Math.min(x1 + columnsPerTeam, this.getWidth());
-            this.renderTeam(
-                teamPlayers.get(team), getManager().getTeamEntry(team), true, x1, x2, 0, teamRows);
-            x1 = x2;
-          } else {
-            for (int y = 0; y < teamRows; y++) {
-              this.setSlot(x1, y, null);
+        int y1 = this.getHeader();
+        Iterator<Team> teamIt = teams.iterator();
+        while (teamIt.hasNext()) {
+          int y2 = y1;
+          for (int x1 = 0; x1 < getWidth(); x1 += columnsPerTeam) {
+            if (!teamIt.hasNext()) {
+              fillEmpty(x1, x1 + columnsPerTeam, y1, y2);
+              continue;
             }
-            x1++;
+
+            Team team = teamIt.next();
+            int currY2 = participantRows + getHeader(); // Default to max height
+            // Size tightly vertically when teams don't use multiple columns
+            if (columnsPerTeam == 1) currY2 = Math.min(y1 + team.getPlayers().size() + 2, currY2);
+
+            if (currY2 > y2) {
+              // If the max y on this row of teams increases, fill the void under previous teams
+              fillEmpty(0, x1, y2, currY2);
+              y2 = currY2;
+            }
+
+            if (y2 > y1) { // At the very least one row will render
+              renderTeam(
+                  teamPlayers.get(team),
+                  getManager().getTeamEntry(team),
+                  true,
+                  true,
+                  x1,
+                  x1 + columnsPerTeam,
+                  y1,
+                  y2);
+            }
           }
+
+          y1 = y2;
         }
+
+        // Clear any leftover empty space after teams
+        fillEmpty(0, getWidth(), y1, participantRows);
       } else {
-        // Minimum rows required by participating players
-        int participantRows =
-            Math.min(
-                availableRows - observerRows,
-                1 + divideRoundingUp(participantPlayers.size(), this.getWidth()));
-
-        // Expand observer rows until all observers are showing
-        observerRows =
-            Math.min(
-                availableRows - participantRows,
-                1 + divideRoundingUp(observingPlayers, this.getWidth()));
-
-        // Expand participant rows to fill whatever if left
+        int participantRows = 2 + divideRoundingUp(participantPlayers.size(), this.getWidth());
+        observerRows = getObserverRows(observingPlayers, observingStaff, participantRows);
         participantRows = availableRows - observerRows;
 
         this.renderTeam(
             participantPlayers,
             getManager().getFreeForAllEntry(match),
             true,
+            true,
             0,
             this.getWidth(),
-            0,
-            participantRows);
+            getHeader(),
+            participantRows + getHeader());
       }
 
       if (observerRows > 0) {
-        // Render blank row between teams and observers
-        for (int x = 0; x < this.getWidth(); x++) {
-          this.setSlot(x, this.getHeight() - observerRows, null);
-        }
-
-        final List<MatchPlayer> obs =
-            observerPlayers.stream()
-                .filter(mp -> isVisible(mp, matchPlayer))
-                .collect(Collectors.toList());
-        Collections.sort(obs, playerOrder);
-
         // Render observers
         this.renderTeam(
-            obs,
+            observerPlayers,
             null,
+            false,
             false,
             0,
             this.getWidth(),
-            this.getHeight() - observerRows + 1,
+            this.getHeight() - observerRows,
             this.getHeight());
+      }
+
+      if (getHeader() > 0) {
+        TabEntry[] header = this.getManager().getHeaderEntries(match);
+        for (int i = 0; i < getWidth(); i++) {
+          setSlot(i, 0, i < header.length ? header[i] : null);
+        }
+
+        fillEmpty(0, getWidth(), 1, getHeader());
       }
     }
 
     super.render();
   }
 
-  @Override
+  private int getMinimumParticipantRows(Collection<Team> teams) {
+    int columnsPerTeam = Math.max(1, this.getWidth() / Math.max(1, teams.size()));
+    int teamsPerColumn = Math.min(this.getWidth(), teams.size());
+
+    int biggestTeamColumn = 0;
+    Iterator<Team> teamIt = teams.iterator();
+    while (teamIt.hasNext()) {
+      int biggestTeam = 0;
+      for (int x = 0; x < teamsPerColumn && teamIt.hasNext(); x++)
+        biggestTeam = Math.max(biggestTeam, teamIt.next().getPlayers().size());
+
+      biggestTeamColumn += 2 + divideRoundingUp(biggestTeam, columnsPerTeam);
+    }
+    return biggestTeamColumn;
+  }
+
+  private int getObserverRows(int observers, int observingStaff, int participantRows) {
+    int obsRows = getHeight() - getHeader() - participantRows;
+    obsRows = Math.min(divideRoundingUp(observers, this.getWidth()), obsRows);
+    obsRows = Math.max(obsRows, divideRoundingUp(observingStaff, this.getWidth()));
+    return obsRows;
+  }
+
   public void onViewerJoinMatch(PlayerJoinMatchEvent event) {
     if (this.getViewer() == event.getPlayer().getBukkit()) {
       this.match = event.getMatch();
@@ -246,14 +251,18 @@ public class MatchTabView extends TabView implements ListeningTabView {
       this.teamOrder = new TeamOrder(this.matchPlayer);
 
       this.observerPlayers.clear();
-      this.match.getObservers().forEach(this::addObserver);
+      this.observerPlayers.addAll(this.match.getObservers());
+      this.observerPlayers.removeIf(this::shouldHide);
       this.participantPlayers.clear();
       this.participantPlayers.addAll(this.match.getParticipants());
 
+      this.teams.clear();
+      this.teamPlayers.clear();
       this.tmm = this.match.getModule(TeamMatchModule.class);
       if (this.tmm != null) {
-        for (Team team : this.tmm.getTeams()) {
-          this.teamPlayers.replaceValues(team, team.getPlayers());
+        for (Team team : this.tmm.getParticipatingTeams()) {
+          this.teams.add(team);
+          this.teamPlayers.putAll(team, team.getPlayers());
         }
       }
 
@@ -261,54 +270,45 @@ public class MatchTabView extends TabView implements ListeningTabView {
     }
   }
 
-  @Override
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onTeamChange(PlayerPartyChangeEvent event) {
     if (this.match != event.getMatch()) return;
 
-    if (event.getOldParty() != null) {
-      this.participantPlayers.remove(event.getPlayer());
-      removeObserver(event.getPlayer());
-    }
-
-    if (event.getNewParty() != null) {
-      if (event.getNewParty() instanceof ObservingParty) {
-        if (!this.observerPlayers.contains(event.getPlayer())) {
-          addObserver(event.getPlayer());
-        }
-      } else {
-        if (!this.participantPlayers.contains(event.getPlayer())) {
-          this.participantPlayers.add(event.getPlayer());
-        }
-      }
-    }
-
-    if (event.getOldParty() instanceof Team) {
-      this.teamPlayers
-          .get((Team) event.getOldParty())
-          .removeAll(Collections.singleton(event.getPlayer()));
-    }
-
-    if (event.getNewParty() instanceof Team
-        && !this.teamPlayers.containsEntry(event.getNewParty(), event.getPlayer())) {
-      this.teamPlayers.put((Team) event.getNewParty(), event.getPlayer());
-    }
-
-    this.invalidateLayout();
+    updatePlayerParty(event.getPlayer(), event.getOldParty(), event.getNewParty());
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPlayerVanish(PlayerVanishEvent event) {
+    updatePlayerParty(
+        event.getPlayer(), event.getPlayer().getParty(), event.getPlayer().getParty());
+  }
+
+  private void updatePlayerParty(
+      MatchPlayer player, @Nullable Party oldParty, @Nullable Party newParty) {
+    if (oldParty != null) {
+      this.participantPlayers.remove(player);
+      this.observerPlayers.remove(player);
+
+      if (oldParty instanceof Team) this.teamPlayers.get((Team) oldParty).remove(player);
+    }
+
+    if (newParty != null && !shouldHide(player)) {
+      List<MatchPlayer> players =
+          newParty instanceof ObservingParty ? observerPlayers : participantPlayers;
+
+      if (!players.contains(player)) players.add(player);
+
+      if (newParty instanceof Team && !this.teamPlayers.containsEntry((Team) newParty, player))
+        this.teamPlayers.put((Team) newParty, player);
+    }
+
     this.invalidateLayout();
   }
 
-  private boolean isVanished(MatchPlayer player) {
-    return PGM.get().getVanishManager().isVanished(player.getId());
-  }
-
-  private boolean isVisible(MatchPlayer target, MatchPlayer viewer) {
-    if (viewer.getBukkit().hasPermission(Permissions.STAFF)) return true;
-    return !isVanished(target);
+  private boolean shouldHide(MatchPlayer other) {
+    return other != matchPlayer
+        && other.isVanished()
+        && !matchPlayer.getBukkit().hasPermission(Permissions.STAFF);
   }
 
   private static int divideRoundingUp(int numerator, int denominator) {

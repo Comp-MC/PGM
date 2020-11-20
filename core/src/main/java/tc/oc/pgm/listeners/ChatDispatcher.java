@@ -111,8 +111,20 @@ public class ChatDispatcher implements Listener {
       desc = "Send a message to everyone",
       usage = "[message]")
   public void sendGlobal(Match match, MatchPlayer sender, @Nullable @Text String message) {
+    if (sender != null && sender.isVanished()) {
+      sendAdmin(match, sender, message);
+      return;
+    }
+
     if (checkMute(sender)) {
-      send(match, sender, message, GLOBAL_FORMAT, viewer -> true, SettingValue.CHAT_GLOBAL);
+      send(
+          match,
+          sender,
+          message,
+          GLOBAL_FORMAT,
+          getChatFormat(null, sender, message),
+          viewer -> true,
+          SettingValue.CHAT_GLOBAL);
     }
   }
 
@@ -121,6 +133,11 @@ public class ChatDispatcher implements Listener {
       desc = "Send a message to your team",
       usage = "[message]")
   public void sendTeam(Match match, MatchPlayer sender, @Nullable @Text String message) {
+    if (sender != null && sender.isVanished()) {
+      sendAdmin(match, sender, message);
+      return;
+    }
+
     final Party party = sender == null ? match.getDefaultParty() : sender.getParty();
 
     // No team chat when playing free-for-all or match end, default to global chat
@@ -135,6 +152,7 @@ public class ChatDispatcher implements Listener {
           sender,
           message,
           TextTranslations.translateLegacy(party.getChatPrefix(), null) + PREFIX_FORMAT,
+          getChatFormat(party.getChatPrefix(), sender, message),
           viewer ->
               party.equals(viewer.getParty())
                   || (viewer.isObserving()
@@ -160,8 +178,9 @@ public class ChatDispatcher implements Listener {
     send(
         match,
         sender,
-        message != null ? BukkitUtils.colorize(message) : message,
+        message != null ? BukkitUtils.colorize(message) : null,
         AC_FORMAT,
+        getChatFormat(ADMIN_CHAT_PREFIX, sender, message),
         AC_FILTER,
         SettingValue.CHAT_ADMIN);
 
@@ -232,6 +251,14 @@ public class ChatDispatcher implements Listener {
         sender,
         message,
         formatPrivateMessage("misc.from", matchReceiver.getBukkit()),
+        getChatFormat(
+            TextComponent.builder()
+                .append(
+                    TranslatableComponent.of("misc.from", TextColor.GRAY, TextDecoration.ITALIC))
+                .append(" ")
+                .build(),
+            sender,
+            message),
         viewer -> viewer.getBukkit().equals(receiver),
         null);
 
@@ -241,6 +268,13 @@ public class ChatDispatcher implements Listener {
         manager.getPlayer(receiver), // Allow for cross-match messages
         message,
         formatPrivateMessage("misc.to", sender.getBukkit()),
+        getChatFormat(
+            TextComponent.builder()
+                .append(TranslatableComponent.of("misc.to", TextColor.GRAY, TextDecoration.ITALIC))
+                .append(" ")
+                .build(),
+            manager.getPlayer(receiver),
+            message),
         viewer -> viewer.getBukkit().equals(sender.getBukkit()),
         null);
   }
@@ -282,7 +316,7 @@ public class ChatDispatcher implements Listener {
 
       if (message.startsWith(GLOBAL_SYMBOL)) {
         sendGlobal(player.getMatch(), player, message.substring(1));
-      } else if (message.startsWith(DM_SYMBOL)) {
+      } else if (message.startsWith(DM_SYMBOL) && message.contains(" ")) {
         final String target = message.substring(1, message.indexOf(" "));
         final MatchPlayer receiver =
             getApproximatePlayer(player.getMatch(), target, player.getBukkit());
@@ -336,12 +370,21 @@ public class ChatDispatcher implements Listener {
       MatchPlayer sender,
       @Nullable String text,
       String format,
+      Component componentMsg,
       Predicate<MatchPlayer> filter,
       @Nullable SettingValue type) {
     // When a message is empty, this indicates the player wants to change their default chat channel
-    if (text == null && sender != null) {
+    if ((text == null || text.isEmpty()) && sender != null) {
       // FIXME: there should be a better way to do this
-      sender.getBukkit().performCommand("set " + SettingKey.CHAT + " " + type.getName());
+      PGM.get()
+          .getExecutor()
+          .schedule(
+              () ->
+                  sender
+                      .getBukkit()
+                      .performCommand("set " + SettingKey.CHAT + " " + type.getName()),
+              50,
+              TimeUnit.MILLISECONDS); // Run sync to stop console spam
       return;
     }
 
@@ -352,18 +395,16 @@ public class ChatDispatcher implements Listener {
           .getAsyncExecutor()
           .execute(
               () -> {
-                final Predicate<MatchPlayer> finalFilter = sender.isVanished() ? AC_FILTER : filter;
-                final String finalFormat = sender.isVanished() ? AC_FORMAT : format;
                 final AsyncPlayerChatEvent event =
                     new AsyncPlayerChatEvent(
                         false,
                         sender.getBukkit(),
                         message,
                         match.getPlayers().stream()
-                            .filter(finalFilter)
+                            .filter(filter)
                             .map(MatchPlayer::getBukkit)
                             .collect(Collectors.toSet()));
-                event.setFormat(finalFormat);
+                event.setFormat(format);
                 CHAT_EVENT_CACHE.put(event, true);
                 match.callEvent(event);
 
@@ -371,9 +412,9 @@ public class ChatDispatcher implements Listener {
                   return;
                 }
 
-                final String finalMessage =
-                    String.format(event.getFormat(), sender.getBukkit().getDisplayName(), message);
-                event.getRecipients().forEach(player -> player.sendMessage(finalMessage));
+                event.getRecipients().stream()
+                    .map(Audience::get)
+                    .forEach(player -> player.sendMessage(componentMsg));
               });
       return;
     }
@@ -441,5 +482,22 @@ public class ChatDispatcher implements Listener {
 
   private static boolean canPlaySound(MatchPlayer viewer) {
     return viewer.getSettings().getValue(SettingKey.SOUNDS).equals(SettingValue.SOUNDS_ALL);
+  }
+
+  private Component getChatFormat(@Nullable Component prefix, MatchPlayer player, String message) {
+    Component msg = TextComponent.of(message != null ? message : "");
+    if (prefix == null)
+      return TextComponent.builder()
+          .append("<", TextColor.WHITE)
+          .append(player.getName(NameStyle.VERBOSE))
+          .append(">: ", TextColor.WHITE)
+          .append(msg)
+          .build();
+    return TextComponent.builder()
+        .append(prefix)
+        .append(player.getName(NameStyle.VERBOSE))
+        .append(": ", TextColor.WHITE)
+        .append(msg)
+        .build();
   }
 }

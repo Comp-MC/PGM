@@ -4,11 +4,12 @@ import app.ashcon.intake.Command;
 import net.kyori.text.TranslatableComponent;
 import net.kyori.text.format.TextColor;
 import org.bukkit.command.CommandSender;
+import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.setting.SettingKey;
 import tc.oc.pgm.api.setting.SettingValue;
-import tc.oc.pgm.modules.StatsMatchModule;
+import tc.oc.pgm.stats.StatsMatchModule;
 import tc.oc.pgm.util.chat.Audience;
 import tc.oc.pgm.util.text.TextException;
 import tc.oc.pgm.util.text.TextFormatter;
@@ -19,7 +20,9 @@ public final class StatsCommand {
       aliases = {"stats"},
       desc = "Show your stats for the match")
   public void stats(Audience audience, CommandSender sender, MatchPlayer player, Match match) {
-    if (player.getSettings().getValue(SettingKey.STATS).equals(SettingValue.STATS_ON)) {
+    if (match.isFinished() && PGM.get().getConfiguration().showVerboseStats()) {
+      match.needModule(StatsMatchModule.class).displayVerboseStatsAndGiveItem(player);
+    } else if (player.getSettings().getValue(SettingKey.STATS).equals(SettingValue.STATS_ON)) {
       audience.sendMessage(
           TextFormatter.horizontalLineHeading(
               sender,

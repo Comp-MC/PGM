@@ -98,6 +98,7 @@ public class ScoreModule implements MapModule {
 
       for (Element scoreEl : scoreElements) {
         config.scoreLimit = XMLUtils.parseNumber(scoreEl.getChild("limit"), Integer.class, -1);
+        config.mercyLimit = XMLUtils.parseNumber(scoreEl.getChild("mercy"), Integer.class, -1);
 
         // For backwards compatibility, default kill/death points to 1 if proto is old and <king/>
         // tag
@@ -137,9 +138,11 @@ public class ScoreModule implements MapModule {
               }
             }
           }
+          boolean silent = XMLUtils.parseBoolean(Node.fromAttr(scoreBoxEl, "silent"), false);
 
           scoreBoxFactories.add(
-              new ScoreBoxFactory(region, points, filter, ImmutableMap.copyOf(redeemables)));
+              new ScoreBoxFactory(
+                  region, points, filter, ImmutableMap.copyOf(redeemables), silent));
         }
       }
       return new ScoreModule(config, scoreBoxFactories.build());

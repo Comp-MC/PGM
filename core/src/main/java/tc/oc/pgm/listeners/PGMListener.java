@@ -35,7 +35,6 @@ import org.bukkit.event.vehicle.VehicleUpdateEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
-import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.event.BlockTransformEvent;
 import tc.oc.pgm.api.match.Match;
@@ -52,6 +51,7 @@ import tc.oc.pgm.events.PlayerParticipationStopEvent;
 import tc.oc.pgm.gamerules.GameRulesMatchModule;
 import tc.oc.pgm.modules.TimeLockModule;
 import tc.oc.pgm.util.UsernameFormatUtils;
+import tc.oc.pgm.util.named.NameStyle;
 import tc.oc.pgm.util.text.PeriodFormats;
 import tc.oc.pgm.util.text.TextTranslations;
 
@@ -180,7 +180,6 @@ public class PGMListener implements Listener {
     }
 
     match.removePlayer(event.getPlayer());
-    PGM.get().getPrefixRegistry().removePlayer(event.getPlayer().getUniqueId());
   }
 
   public static void announceJoinOrLeave(MatchPlayer player, boolean join, boolean staffOnly) {
@@ -192,7 +191,7 @@ public class PGMListener implements Listener {
     checkNotNull(player);
     Collection<MatchPlayer> viewers =
         player.getMatch().getPlayers().stream()
-            .filter(p -> (staffOnly ? p.getBukkit().hasPermission(Permissions.STAFF) : true))
+            .filter(p -> !staffOnly || p.getBukkit().hasPermission(Permissions.STAFF))
             .collect(Collectors.toList());
 
     for (MatchPlayer viewer : viewers) {
@@ -206,10 +205,8 @@ public class PGMListener implements Listener {
 
       SettingValue option = viewer.getSettings().getValue(SettingKey.JOIN);
       if (option.equals(SettingValue.JOIN_ON)) {
-        Component name =
-            TextComponent.of(
-                player.getBukkit().getDisplayName(viewer.getBukkit()) + ChatColor.YELLOW);
-        Component component = TranslatableComponent.of(key, name);
+        Component component =
+            TranslatableComponent.of(key, TextColor.YELLOW, player.getName(NameStyle.CONCISE));
         viewer.sendMessage(
             staffOnly
                 ? ChatDispatcher.ADMIN_CHAT_PREFIX.append(component.color(TextColor.YELLOW))

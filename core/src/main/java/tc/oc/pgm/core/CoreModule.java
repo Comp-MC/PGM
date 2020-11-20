@@ -86,7 +86,7 @@ public class CoreModule implements MapModule {
 
         // TODO: rename to owner on the next breaking revision
         TeamFactory owner =
-            Teams.getTeam(XMLUtils.getRequiredAttribute(coreEl, "team").getValue(), context);
+            Teams.getTeam(new Node(XMLUtils.getRequiredAttribute(coreEl, "team")), context);
         Region region;
         RegionParser parser = context.getRegions();
         if (context.getProto().isOlderThan(MapProtos.MODULE_SUBELEMENT_VERSION)) {
@@ -116,6 +116,7 @@ public class CoreModule implements MapModule {
         }
 
         boolean modeChanges = XMLUtils.parseBoolean(coreEl.getAttribute("mode-changes"), false);
+        boolean showProgress = XMLUtils.parseBoolean(coreEl.getAttribute("show-progress"), false);
         boolean visible = XMLUtils.parseBoolean(coreEl.getAttribute("show"), true);
         Boolean required = XMLUtils.parseBoolean(coreEl.getAttribute("required"), null);
         ProximityMetric proximityMetric =
@@ -133,7 +134,8 @@ public class CoreModule implements MapModule {
                 region,
                 material,
                 leakLevel,
-                modeChanges);
+                modeChanges,
+                showProgress);
         context.getFeatures().addFeature(coreEl, factory);
         coreFactories.add(factory);
       }

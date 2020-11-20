@@ -208,6 +208,16 @@ public abstract class FilterParser {
     return new SameTeamFilter(parseChild(el));
   }
 
+  @MethodParser("participating")
+  public ParticipatingFilter parseParticipating(Element el) {
+    return ParticipatingFilter.PARTICIPATING;
+  }
+
+  @MethodParser("observing")
+  public ParticipatingFilter parseObserving(Element el) {
+    return ParticipatingFilter.OBSERVING;
+  }
+
   @MethodParser("attacker")
   public AttackerFilter parseAttacker(Element el) throws InvalidXMLException {
     return new AttackerFilter(parseChild(el));
@@ -287,6 +297,11 @@ public abstract class FilterParser {
       } else {
         range = Range.closed(min, max);
       }
+    }
+
+    if (!range.hasUpperBound() && repeat) {
+      throw new InvalidXMLException(
+          "kill-streak filters with repeat=\"true\" must define a max or count", el);
     }
 
     return new KillStreakFilter(range, repeat);
@@ -432,5 +447,10 @@ public abstract class FilterParser {
   @MethodParser("time")
   public TimeFilter parseTimeFilter(Element el) throws InvalidXMLException {
     return new TimeFilter(XMLUtils.parseDuration(el, null));
+  }
+
+  @MethodParser("score")
+  public ScoreFilter parseScoreFilter(Element el) throws InvalidXMLException {
+    return new ScoreFilter(XMLUtils.parseNumericRange(new Node(el), Integer.class));
   }
 }

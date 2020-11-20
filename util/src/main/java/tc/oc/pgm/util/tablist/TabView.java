@@ -1,11 +1,14 @@
 package tc.oc.pgm.util.tablist;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.Nullable;
+import net.md_5.bungee.api.chat.BaseComponent;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import tc.oc.pgm.util.bukkit.ViaUtils;
 
 /**
  * A single player's tab list. When this view is enabled, it creates a scoreboard team for each slot
@@ -26,8 +29,12 @@ public class TabView {
   protected @Nullable TabManager manager;
 
   // True when any slots/header/footer have been changed but not rendered
-  private boolean dirtyLayout, dirtyContent, dirtyHeaderFooter;
+  private boolean dirtyLayout, dirtyContent, dirtyHeader, dirtyFooter;
   private final TabEntry[] slots, rendered;
+  private BaseComponent[] header, footer;
+
+  // Only used for legacy players, initialized on enable
+  protected @Nullable TabDisplay display = null;
 
   public TabView(Player viewer) {
     this.viewer = viewer;
@@ -65,11 +72,16 @@ public class TabView {
   public void enable(TabManager manager) {
     if (this.manager != null) disable();
     this.manager = manager;
+
+    if (ViaUtils.getProtocolVersion(viewer) < ViaUtils.VERSION_1_8)
+      this.display = new TabDisplay(viewer, WIDTH);
+
     this.setup();
 
     this.invalidateLayout();
     this.invalidateContent();
-    this.invalidateHeaderFooter();
+    this.invalidateHeader();
+    this.invalidateFooter();
   }
 
   /** Tear down the display and return control the the viewer's player list to settings */
@@ -108,16 +120,21 @@ public class TabView {
 
   protected void invalidateContent(TabEntry entry) {
     int slot = getSlot(entry);
-    if (slot >= this.size) {
-      this.invalidateHeaderFooter();
-    } else if (slot >= 0) {
-      this.invalidateContent();
+    if (slot == this.headerSlot) this.invalidateHeader();
+    else if (slot == this.footerSlot) this.invalidateFooter();
+    else if (slot >= 0) this.invalidateContent();
+  }
+
+  protected void invalidateHeader() {
+    if (!this.dirtyHeader) {
+      this.dirtyHeader = true;
+      this.invalidateManager();
     }
   }
 
-  protected void invalidateHeaderFooter() {
-    if (!this.dirtyHeaderFooter) {
-      this.dirtyHeaderFooter = true;
+  protected void invalidateFooter() {
+    if (!this.dirtyFooter) {
+      this.dirtyFooter = true;
       this.invalidateManager();
     }
   }
@@ -158,8 +175,10 @@ public class TabView {
 
       if (slot < this.size) {
         this.invalidateLayoutAndContent();
-      } else {
-        this.invalidateHeaderFooter();
+      } else if (slot == this.headerSlot) {
+        this.invalidateHeader();
+      } else if (slot == this.footerSlot) {
+        this.invalidateFooter();
       }
     }
   }
@@ -183,6 +202,11 @@ public class TabView {
   public void render() {
     if (this.manager == null) return;
 
+    if (this.display != null) {
+      renderLegacy();
+      return;
+    }
+
     TabRender render = new TabRender(this);
     this.renderLayout(render);
     this.renderContent(render);
@@ -191,8 +215,51 @@ public class TabView {
     render.finish();
   }
 
+  private void renderLegacy() {
+    if (this.manager == null || display == null) return;
+
+    if (this.dirtyLayout || this.dirtyContent) {
+      this.dirtyLayout = this.dirtyContent = false;
+
+      // X & Y are transposed in legacy versions, gotta convert
+      for (int x = 0; x < WIDTH; x++) {
+        for (int y = 0; y < HEIGHT; y++) {
+          int i = slotIndex(x, y);
+
+          if (this.slots[i] == this.rendered[i] && !this.slots[i].isDirty(this)) continue;
+          this.rendered[i] = this.slots[i];
+
+          this.display.set(x, y, toPlain(this.rendered[i].getContent(this)));
+        }
+      }
+    }
+    this.markSlotsClean();
+  }
+
+  private String toPlain(BaseComponent[] components) {
+    StringBuilder bl = new StringBuilder();
+    for (BaseComponent component : components) {
+      bl.append(component.toLegacyText());
+    }
+    return bl.toString();
+  }
+
+  public void renderPing() {
+    if (this.manager == null || this.display != null) return;
+
+    TabRender render = new TabRender(this);
+
+    // Build the update packet from entries with updated ping that are not being added or removed
+    for (int i = 0; i < this.size; i++) {
+      TabEntry slot = this.slots[i];
+      if (slot instanceof PlayerTabEntry) render.updatePing(slot, i);
+    }
+
+    render.finish();
+  }
+
   public void renderLayout(TabRender render) {
-    if (this.manager == null) return;
+    if (this.manager == null || this.display != null) return;
 
     if (this.dirtyLayout) {
       this.dirtyLayout = false;
@@ -241,7 +308,7 @@ public class TabView {
   }
 
   public void renderContent(TabRender render) {
-    if (this.manager == null) return;
+    if (this.manager == null || this.display != null) return;
 
     if (this.dirtyContent) {
       this.dirtyContent = false;
@@ -262,13 +329,19 @@ public class TabView {
   }
 
   public void renderHeaderFooter(TabRender render, boolean force) {
-    if (this.manager == null) return;
+    if (this.manager == null || this.display != null) return;
 
-    if (force || this.dirtyHeaderFooter) {
-      this.dirtyHeaderFooter = false;
-      render.setHeaderFooter(
-          this.rendered[this.headerSlot] = this.slots[this.headerSlot],
-          this.rendered[this.footerSlot] = this.slots[this.footerSlot]);
+    if (force || this.dirtyHeader || this.dirtyFooter) {
+      if (force || this.dirtyHeader) {
+        this.dirtyHeader = false;
+        header = (this.rendered[this.headerSlot] = this.slots[this.headerSlot]).getContent(this);
+      }
+      if (force || this.dirtyFooter) {
+        this.dirtyFooter = false;
+        footer = (this.rendered[this.footerSlot] = this.slots[this.footerSlot]).getContent(this);
+      }
+
+      render.setHeaderFooter(header, footer);
       this.slots[this.headerSlot].markClean(this);
       this.slots[this.footerSlot].markClean(this);
     }
@@ -280,6 +353,13 @@ public class TabView {
     for (int slot = 0; slot < this.slots.length; slot++) {
       this.slots[slot] = this.manager.getBlankEntry(slot);
       this.slots[slot].addToView(this);
+    }
+
+    if (display != null) {
+      display.setup();
+      System.arraycopy(this.slots, 0, this.rendered, 0, this.size);
+
+      return;
     }
 
     TabRender render = new TabRender(this);
@@ -296,10 +376,19 @@ public class TabView {
   private void tearDown() {
     if (this.manager == null) return;
 
+    if (this.display != null) {
+      Arrays.fill(this.slots, null);
+      Arrays.fill(this.rendered, null);
+      display.tearDown();
+
+      return;
+    }
+
     TabRender render = new TabRender(this);
 
     render.setHeaderFooter(
-        this.manager.getBlankEntry(this.headerSlot), this.manager.getBlankEntry(this.footerSlot));
+        this.manager.getBlankEntry(this.headerSlot).getContent(this),
+        this.manager.getBlankEntry(this.footerSlot).getContent(this));
 
     for (int index = 0; index < this.size; index++) {
       render.destroySlot(this.rendered[index], index);
@@ -310,7 +399,7 @@ public class TabView {
   }
 
   protected void refreshEntry(TabEntry entry) {
-    if (this.manager == null) return;
+    if (this.manager == null || this.display != null) return;
 
     TabRender render = new TabRender(this);
     int slot = getSlot(entry);
@@ -323,7 +412,7 @@ public class TabView {
   }
 
   protected void updateFakeEntity(TabEntry entry) {
-    if (this.manager == null) return;
+    if (this.manager == null || this.display != null) return;
 
     TabRender render = new TabRender(this);
     render.updateFakeEntity(entry, false);
@@ -331,7 +420,7 @@ public class TabView {
   }
 
   private void respawnFakeEntities() {
-    if (this.manager == null) return;
+    if (this.manager == null || this.display != null) return;
 
     this.viewer
         .getServer()

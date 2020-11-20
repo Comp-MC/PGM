@@ -21,6 +21,7 @@ import tc.oc.pgm.api.map.MapOrder;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchManager;
 import tc.oc.pgm.api.party.Party;
+import tc.oc.pgm.api.party.VictoryCondition;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.setting.SettingKey;
 import tc.oc.pgm.api.setting.SettingValue;
@@ -45,6 +46,7 @@ import tc.oc.pgm.command.StartCommand;
 import tc.oc.pgm.command.StatsCommand;
 import tc.oc.pgm.command.TeamCommand;
 import tc.oc.pgm.command.TimeLimitCommand;
+import tc.oc.pgm.command.VotingCommand;
 import tc.oc.pgm.teams.TeamMatchModule;
 import tc.oc.pgm.util.chat.Audience;
 
@@ -82,6 +84,7 @@ public class CommandGraph extends BasicBukkitCommandGraph {
     register(new StatsCommand());
     register(new TeamCommand(), "team");
     register(new TimeLimitCommand());
+    register(new VotingCommand(), "vote", "votes");
   }
 
   public void register(Object command, String... aliases) {
@@ -108,6 +111,7 @@ public class CommandGraph extends BasicBukkitCommandGraph {
       bind(MapInfo.class, new MapInfoParser());
       bind(Party.class, new PartyProvider());
       bind(TeamMatchModule.class, new TeamsProvider());
+      bind(VictoryCondition.class, new VictoryConditionProvider());
       bind(SettingKey.class, new SettingKeyParser());
       bind(SettingValue.class, new EnumProvider<>(SettingValue.class));
     }

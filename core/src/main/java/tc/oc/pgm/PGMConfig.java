@@ -11,6 +11,7 @@ import static tc.oc.pgm.util.text.TextParser.parseUri;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Range;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -67,7 +68,7 @@ public final class PGMConfig implements Config {
 
   // gameplay.*
   private final boolean woolRefill;
-  private final boolean globalLegacyFlagBeams;
+  private final int griefScore;
 
   // join.*
   private final long minPlayers;
@@ -76,17 +77,24 @@ public final class PGMConfig implements Config {
   private final boolean balanceJoin;
   private final boolean queueJoin;
   private final boolean anytimeJoin;
+  private final boolean flagBeams;
 
   // ui.*
   private final boolean showSideBar;
   private final boolean showTabList;
+  private final boolean showTabListPing;
   private final boolean showProximity;
   private final boolean showFireworks;
   private final boolean participantsSeeObservers;
+  private final boolean verboseStats;
 
   // sidebar.*
   private final Component header;
   private final Component footer;
+
+  // tablist.*
+  private final Component rightTablistText;
+  private final Component leftTablistText;
 
   // community.*
   private final boolean communityMode;
@@ -129,33 +137,7 @@ public final class PGMConfig implements Config {
     }
 
     for (Map<?, ?> repository : repositories) {
-      final URI uri = parseUri(String.valueOf(repository.get("uri")));
-
-      String branch = String.valueOf(repository.get("branch"));
-      if (branch.isEmpty() || branch.equals("null")) {
-        branch = null;
-      }
-
-      String path = String.valueOf(repository.get("path"));
-      final File folder;
-      if (path.isEmpty() || path.equals("null")) {
-        folder =
-            new File(
-                "maps", (uri.getHost() + uri.getPath()).replaceAll("[/._]", "-").toLowerCase());
-      } else {
-        folder = new File(path);
-      }
-
-      this.mapSourceFactories.add(new GitMapSourceFactory(folder, uri, branch));
-
-      final Object subFolders = repository.get("folders");
-      if (subFolders instanceof List) {
-        for (Object subFolder : (List) subFolders) {
-          folders.add(new File(folder, subFolder.toString()).getAbsolutePath());
-        }
-      } else {
-        folders.add(folder.getAbsolutePath());
-      }
+      registerRemoteMapSource(mapSourceFactories, repository);
     }
 
     for (String folder : folders) {
@@ -179,8 +161,9 @@ public final class PGMConfig implements Config {
     this.matchLimit = parseInteger(config.getString("restart.match-limit", "30"));
 
     this.woolRefill = parseBoolean(config.getString("gameplay.refill-wool", "true"));
-    this.globalLegacyFlagBeams =
-        parseBoolean(config.getString("gameplay.global-legacy-flag-beams", "true"));
+    this.verboseStats = parseBoolean(config.getString("ui.verbose-stats", "false"));
+    this.griefScore =
+        parseInteger(config.getString("gameplay.grief-score", "-10"), Range.atMost(0));
 
     this.minPlayers = parseInteger(config.getString("join.min-players", "1"));
     this.limitJoin = parseBoolean(config.getString("join.limit", "true"));
@@ -192,13 +175,21 @@ public final class PGMConfig implements Config {
     this.showProximity = parseBoolean(config.getString("ui.proximity", "false"));
     this.showSideBar = parseBoolean(config.getString("ui.sidebar", "true"));
     this.showTabList = parseBoolean(config.getString("ui.tablist", "true"));
+    this.showTabListPing = parseBoolean(config.getString("ui.ping", "true"));
     this.participantsSeeObservers =
         parseBoolean(config.getString("ui.participants-see-observers", "true"));
     this.showFireworks = parseBoolean(config.getString("ui.fireworks", "true"));
+    this.flagBeams = parseBoolean(config.getString("ui.flag-beams", "false"));
+
     final String header = config.getString("sidebar.header");
     this.header = header == null || header.isEmpty() ? null : parseComponent(header);
     final String footer = config.getString("sidebar.footer");
     this.footer = footer == null || footer.isEmpty() ? null : parseComponent(footer);
+    final String leftText = config.getString("tablist.left");
+    this.leftTablistText = leftText == null || leftText.isEmpty() ? null : parseComponent(leftText);
+    final String rightText = config.getString("tablist.right");
+    this.rightTablistText =
+        rightText == null || rightText.isEmpty() ? null : parseComponent(rightText);
 
     this.communityMode = parseBoolean(config.getString("community.enabled", "true"));
 
@@ -214,6 +205,46 @@ public final class PGMConfig implements Config {
     this.experiments = experiments == null ? ImmutableMap.of() : experiments.getValues(false);
   }
 
+  public static final Map<?, ?> DEFAULT_REMOTE_REPO =
+      ImmutableMap.of("uri", "https://github.com/PGMDev/Maps", "path", "default-maps");
+
+  public static void registerRemoteMapSource(
+      List<MapSourceFactory> mapSources, Map<?, ?> repository) {
+    final URI uri = parseUri(String.valueOf(repository.get("uri")));
+
+    String branch = String.valueOf(repository.get("branch"));
+    if (branch.isEmpty() || branch.equals("null")) {
+      branch = null;
+    }
+
+    String path = String.valueOf(repository.get("path"));
+    final File folder;
+    if (path.isEmpty() || path.equals("null")) {
+      folder =
+          new File("maps", (uri.getHost() + uri.getPath()).replaceAll("[/._]", "-").toLowerCase());
+    } else {
+      folder = new File(path);
+    }
+
+    mapSources.add(new GitMapSourceFactory(folder, uri, branch));
+
+    TreeSet<File> folders = new TreeSet<>();
+    final Object subFolders = repository.get("folders");
+    if (subFolders instanceof List) {
+      for (Object subFolder : (List) subFolders) {
+        folders.add(new File(folder, subFolder.toString()));
+      }
+    } else {
+      folders.add(folder);
+    }
+
+    for (File folderFile : folders) {
+      mapSources.add(
+          new SystemMapSourceFactory(
+              folderFile.isAbsolute() ? folderFile : folderFile.getAbsoluteFile()));
+    }
+  }
+
   // TODO: Can be removed after 1.0 release
   private static void handleLegacyConfig(FileConfiguration config, File dataFolder) {
     // v0.9 uses map.folders instead of map.sources
@@ -221,10 +252,7 @@ public final class PGMConfig implements Config {
       renameKey(config, "map.sources", "map.folders");
 
       if (config.getStringList("map.folders").contains("default")) {
-        config.set(
-            "map.repositories",
-            ImmutableList.of(
-                ImmutableMap.of("uri", "https://github.com/PGMDev/Maps", "path", "default-maps")));
+        config.set("map.repositories", ImmutableList.of(DEFAULT_REMOTE_REPO));
       }
 
       try {
@@ -486,8 +514,8 @@ public final class PGMConfig implements Config {
   }
 
   @Override
-  public boolean shouldShowLegacyFlagBeamsGlobally() {
-    return globalLegacyFlagBeams;
+  public int getGriefScore() {
+    return griefScore;
   }
 
   @Override
@@ -506,13 +534,32 @@ public final class PGMConfig implements Config {
   }
 
   @Override
+  public Component getLeftTablistText() {
+    return leftTablistText;
+  }
+
+  @Override
+  public Component getRightTablistText() {
+    return rightTablistText;
+  }
+
+  @Override
   public boolean showTabList() {
     return showTabList;
   }
 
   @Override
+  public boolean showTabListPing() {
+    return showTabListPing;
+  }
+
+  @Override
   public boolean canParticipantsSeeObservers() {
     return participantsSeeObservers;
+  }
+
+  public boolean showVerboseStats() {
+    return verboseStats;
   }
 
   @Override
@@ -523,6 +570,11 @@ public final class PGMConfig implements Config {
   @Override
   public boolean showFireworks() {
     return showFireworks;
+  }
+
+  @Override
+  public boolean useLegacyFlagBeams() {
+    return flagBeams;
   }
 
   @Override
@@ -547,15 +599,14 @@ public final class PGMConfig implements Config {
 
   private static class Group implements Config.Group {
     private final String id;
-    private final String prefix;
+    private final Flair flair;
     private final Permission permission;
     private final Permission observerPermission;
     private final Permission participantPermission;
 
     public Group(ConfigurationSection config) throws TextException {
       this.id = config.getName();
-      final String prefix = config.getString("prefix");
-      this.prefix = prefix == null ? null : parseComponentLegacy(prefix);
+      this.flair = new Flair(config);
       final PermissionDefault def =
           id.equalsIgnoreCase("op")
               ? PermissionDefault.OP
@@ -611,8 +662,79 @@ public final class PGMConfig implements Config {
     }
 
     @Override
+    public Flair getFlair() {
+      return flair;
+    }
+  }
+
+  private static class Flair implements Config.Flair {
+
+    private String prefix;
+    private String suffix;
+    private String displayName;
+    private String description;
+    private String clickLink;
+    private Component prefixOverride;
+    private Component suffixOverride;
+
+    public Flair(ConfigurationSection config) {
+      final String prefix = config.getString("prefix");
+      this.prefix = prefix == null ? null : parseComponentLegacy(prefix);
+
+      final String suffix = config.getString("suffix");
+      this.suffix = suffix == null ? null : parseComponentLegacy(suffix);
+
+      final String name = config.getString("display-name");
+      this.displayName = name == null ? null : parseComponentLegacy(name);
+
+      final String desc = config.getString("description");
+      this.description = desc == null ? null : parseComponentLegacy(desc);
+
+      final String link = config.getString("click-link");
+      this.clickLink = link == null ? null : parseComponentLegacy(link);
+
+      final String prefixComp = config.getString("prefix-component");
+      this.prefixOverride =
+          prefixComp == null || prefixComp.isEmpty() ? null : parseComponent(prefixComp);
+
+      final String suffixComp = config.getString("suffix-component");
+      this.suffixOverride =
+          suffixComp == null || suffixComp.isEmpty() ? null : parseComponent(suffixComp);
+    }
+
+    @Override
     public String getPrefix() {
       return prefix;
+    }
+
+    @Override
+    public String getSuffix() {
+      return suffix;
+    }
+
+    @Override
+    public String getDescription() {
+      return description;
+    }
+
+    @Override
+    public String getDisplayName() {
+      return displayName;
+    }
+
+    @Override
+    public String getClickLink() {
+      return clickLink;
+    }
+
+    @Override
+    public Component getPrefixOverride() {
+      return prefixOverride;
+    }
+
+    @Override
+    public Component getSuffixOverride() {
+      return suffixOverride;
     }
   }
 

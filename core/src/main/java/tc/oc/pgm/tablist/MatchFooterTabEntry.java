@@ -3,16 +3,19 @@ package tc.oc.pgm.tablist;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
+import net.kyori.text.Component;
 import net.kyori.text.TextComponent;
 import net.kyori.text.TranslatableComponent;
 import net.kyori.text.format.TextColor;
 import net.md_5.bungee.api.chat.BaseComponent;
+import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchScope;
+import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.setting.SettingKey;
 import tc.oc.pgm.api.setting.SettingValue;
-import tc.oc.pgm.modules.StatsMatchModule;
+import tc.oc.pgm.stats.StatsMatchModule;
 import tc.oc.pgm.util.TimeUtils;
 import tc.oc.pgm.util.tablist.DynamicTabEntry;
 import tc.oc.pgm.util.tablist.TabView;
@@ -30,12 +33,10 @@ public class MatchFooterTabEntry extends DynamicTabEntry {
   @Override
   public void addToView(TabView view) {
     super.addToView(view);
-    if (this.tickTask == null) {
+    if (this.tickTask == null && match.isLoaded()) {
       Runnable tick = MatchFooterTabEntry.this::invalidate;
       this.tickTask =
-          match
-              .getExecutor(MatchScope.LOADED)
-              .scheduleWithFixedDelay(tick, 0, TimeUtils.TICK * 5, TimeUnit.MILLISECONDS);
+          match.getExecutor(MatchScope.LOADED).scheduleWithFixedDelay(tick, 0, 1, TimeUnit.SECONDS);
     }
   }
 
@@ -49,15 +50,26 @@ public class MatchFooterTabEntry extends DynamicTabEntry {
   }
 
   @Override
-  public BaseComponent getContent(TabView view) {
+  public BaseComponent[] getContent(TabView view) {
     TextComponent.Builder content = TextComponent.builder();
 
     MatchPlayer viewer = match.getPlayer(view.getViewer());
+    boolean timeOnly = viewer != null && viewer.isLegacy();
 
-    if (viewer.getCompetitor() != null
+    if (!timeOnly
+        && viewer != null
+        && viewer.getParty() instanceof Competitor
+        && (match.isRunning() || match.isFinished())
         && viewer.getSettings().getValue(SettingKey.STATS).equals(SettingValue.STATS_ON)) {
-      content.append(match.getModule(StatsMatchModule.class).getBasicStatsMessage(viewer.getId()));
-      content.append("\n");
+      content.append(match.needModule(StatsMatchModule.class).getBasicStatsMessage(viewer.getId()));
+      content.append(TextComponent.newline());
+    }
+
+    final Component leftContent = PGM.get().getConfiguration().getLeftTablistText();
+    final Component rightContent = PGM.get().getConfiguration().getRightTablistText();
+
+    if (!timeOnly && leftContent != null) {
+      content.append(leftContent.colorIfAbsent(TextColor.WHITE)).append(" - ", TextColor.DARK_GRAY);
     }
 
     content
@@ -67,7 +79,13 @@ public class MatchFooterTabEntry extends DynamicTabEntry {
             TimeUtils.formatDuration(match.getDuration()),
             this.match.isRunning() ? TextColor.GREEN : TextColor.GOLD);
 
-    return TextTranslations.toBaseComponent(
+    if (!timeOnly && rightContent != null) {
+      content
+          .append(" - ", TextColor.DARK_GRAY)
+          .append(rightContent.colorIfAbsent(TextColor.WHITE));
+    }
+
+    return TextTranslations.toBaseComponentArray(
         content.colorIfAbsent(TextColor.DARK_GRAY).build(), view.getViewer());
   }
 }
