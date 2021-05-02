@@ -165,9 +165,6 @@ public interface Modules {
     // Modules that help older player versions
     register(LegacyFlagBeamMatchModule.class, LegacyFlagBeamMatchModule::new);
 
-    // Modules that depend help older player versions
-    register(LegacyFlagBeamMatchModule.class, LegacyFlagBeamMatchModule::new);
-
     // Community MatchModules
     register(FreezeMatchModule.class, FreezeMatchModule::new);
 
