@@ -9,6 +9,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BannerMeta;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.material.MaterialData;
 import tc.oc.pgm.util.block.BlockFaces;
 
@@ -88,12 +89,57 @@ public interface Materials {
     }
   }
 
+  static boolean itemsSimilar(
+      ItemStack first, ItemStack second, boolean skipDur, boolean skipCheckingName) {
+    if (first == second) {
+      return true;
+    }
+    if (second == null
+        || first == null
+        || !first.getType().equals(second.getType())
+        || (!skipDur && first.getDurability() != second.getDurability())) {
+      return false;
+    }
+    final boolean hasMeta1 = first.hasItemMeta();
+    final boolean hasMeta2 = second.hasItemMeta();
+    if (!hasMeta1 && !hasMeta2) {
+      return true;
+    }
+
+    final ItemMeta meta1 = hasMeta1 ? first.getItemMeta() : null;
+    final ItemMeta meta2 = hasMeta2 ? second.getItemMeta() : null;
+
+    final String prevName1 = meta1 != null ? meta1.getDisplayName() : null;
+    final String prevName2 = meta2 != null ? meta2.getDisplayName() : null;
+    if (skipCheckingName) {
+      if (meta1 != null) {
+        meta1.setDisplayName(null);
+      }
+      if (meta2 != null) {
+        meta2.setDisplayName(null);
+      }
+    }
+
+    try {
+      return Bukkit.getItemFactory().equals(meta1, meta2);
+    } finally {
+      if (skipCheckingName) {
+        if (meta1 != null) {
+          meta1.setDisplayName(prevName1);
+        }
+        if (meta2 != null) {
+          meta2.setDisplayName(prevName2);
+        }
+      }
+    }
+  }
+
   static boolean isSolid(MaterialData material) {
     return isSolid(material.getItemType());
   }
 
   static boolean isSolid(BlockState block) {
-    return isSolid(block.getMaterial());
+    return isSolid(block.getType());
   }
 
   static boolean isWater(Material material) {
@@ -109,7 +155,7 @@ public interface Materials {
   }
 
   static boolean isWater(BlockState block) {
-    return isWater(block.getMaterial());
+    return isWater(block.getType());
   }
 
   static boolean isLava(Material material) {
@@ -125,7 +171,7 @@ public interface Materials {
   }
 
   static boolean isLava(BlockState block) {
-    return isLava(block.getMaterial());
+    return isLava(block.getType());
   }
 
   static boolean isLiquid(Material material) {
@@ -188,17 +234,22 @@ public interface Materials {
     block.setPatterns(meta.getPatterns());
   }
 
-  static void placeStanding(Location location, BannerMeta meta) {
+  static boolean placeStanding(Location location, BannerMeta meta) {
     Block block = location.getBlock();
-    block.setType(Material.STANDING_BANNER);
+    block.setType(Material.STANDING_BANNER, false);
 
-    Banner banner = (Banner) block.getState();
-    applyToBlock(banner, meta);
+    final BlockState state = block.getState();
+    if (state instanceof Banner) {
+      Banner banner = (Banner) block.getState();
+      applyToBlock(banner, meta);
 
-    org.bukkit.material.Banner material = (org.bukkit.material.Banner) banner.getData();
-    material.setFacingDirection(BlockFaces.yawToFace(location.getYaw()));
-    banner.setData(material);
-    banner.update(true);
+      org.bukkit.material.Banner material = (org.bukkit.material.Banner) banner.getData();
+      material.setFacingDirection(BlockFaces.yawToFace(location.getYaw()));
+      banner.setData(material);
+      banner.update(true, false);
+      return true;
+    }
+    return false;
   }
 
   static Location getLocationWithYaw(Banner block) {

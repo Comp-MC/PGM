@@ -1,15 +1,14 @@
 package tc.oc.pgm.util.xml;
 
-import com.google.common.base.Preconditions;
+import static tc.oc.pgm.util.Assert.assertNotNull;
+
 import com.google.common.collect.Sets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import javax.annotation.Nullable;
 import org.jdom2.Attribute;
-import org.jdom2.Document;
 import org.jdom2.Element;
 import org.jdom2.located.Located;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * A hybrid wrapper for either an {@link Element} or an {@link Attribute}, enabling both of them to
@@ -20,13 +19,11 @@ public class Node {
   private final Object node;
 
   public Node(Element element) {
-    Preconditions.checkNotNull(element);
-    this.node = element;
+    this.node = assertNotNull(element);
   }
 
   public Node(Attribute attribute) {
-    Preconditions.checkNotNull(attribute);
-    this.node = attribute;
+    this.node = assertNotNull(attribute);
   }
 
   public String getName() {
@@ -74,15 +71,26 @@ public class Node {
     return (Element) this.node;
   }
 
-  public Document getDocument() {
+  public String getDocumentPath() {
     if (this.node instanceof Attribute) {
-      return ((Attribute) this.node).getDocument();
+      return getDocumentPath(getAttribute().getParent());
     } else {
-      return ((Element) this.node).getDocument();
+      return getDocumentPath(getElement());
     }
   }
 
+  private static String getDocumentPath(Element el) {
+    InheritingElement inheritingEl = (InheritingElement) el;
+
+    String original = inheritingEl.getOriginalUri();
+    String current = inheritingEl.getDocument().getBaseURI();
+    return current + (original == null || current.equals(original) ? "" : original);
+  }
+
   private static String describe(Element el) {
+    Element parent = el.getParentElement();
+    if (parent != null && !parent.isRootElement())
+      return "'" + parent.getName() + "' > '" + el.getName() + "' element";
     return "'" + el.getName() + "' element";
   }
 
@@ -96,20 +104,32 @@ public class Node {
   }
 
   public int getStartLine() {
+    return getStartLine(node);
+  }
+
+  private static int getStartLine(Object node) {
     if (node instanceof InheritingElement) {
       return ((InheritingElement) node).getStartLine();
     } else if (node instanceof Located) {
       return ((Located) node).getLine();
+    } else if (node instanceof Attribute) {
+      return getStartLine(((Attribute) node).getParent());
     } else {
       return 0;
     }
   }
 
   public int getEndLine() {
+    return getEndLine(node);
+  }
+
+  public static int getEndLine(Object node) {
     if (node instanceof InheritingElement) {
       return ((InheritingElement) node).getEndLine();
     } else if (node instanceof Located) {
       return ((Located) node).getLine();
+    } else if (node instanceof Attribute) {
+      return getEndLine(((Attribute) node).getParent());
     } else {
       return 0;
     }
@@ -145,6 +165,17 @@ public class Node {
   }
 
   /**
+   * Return a new Node wrapping an Attribute of the given Element matching one of the given names,
+   * or the element itself if the given Element has no matching Attributes. Note: this is mostly
+   * useful for properties that are allowed as either refs or direct children.
+   */
+  public static Node fromAttrOrSelf(Element el, String... aliases) throws InvalidXMLException {
+    Node node = null;
+    for (String alias : aliases) node = wrapUnique(node, true, alias, el.getAttribute(alias));
+    return node != null ? node : new Node(el);
+  }
+
+  /**
    * Return a new Node wrapping the named Attribute of the given Element. If the Attribute does not
    * exist, throw an InvalidXMLException complaining about it.
    */
@@ -158,11 +189,8 @@ public class Node {
 
   public static List<Node> fromChildren(List<Node> nodes, Element el, String... aliases)
       throws InvalidXMLException {
-    Set<String> aliasSet = Sets.newHashSet(aliases);
-    for (Element child : el.getChildren()) {
-      if (aliasSet.contains(child.getName())) {
-        nodes.add(new Node(child));
-      }
+    for (Element child : ((InheritingElement) el).getChildren(Sets.newHashSet(aliases))) {
+      nodes.add(new Node(child));
     }
     return nodes;
   }

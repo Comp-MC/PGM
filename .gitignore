@@ -29,6 +29,9 @@ dependency-reduced-pom.xml
 xcuserdata
 *class
 
+# VSCode files
+.vscode
+
 # Minecraft generated files
 banned-ips.json
 banned-players.json
@@ -36,6 +39,7 @@ ops.json
 help.yml
 server.properties
 sportpaper.yml
+sportpaper.jar
 update
 usercache.json
 whitelist.json

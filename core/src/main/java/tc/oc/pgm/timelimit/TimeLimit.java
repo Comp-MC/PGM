@@ -1,24 +1,23 @@
 package tc.oc.pgm.timelimit;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static net.kyori.adventure.text.Component.translatable;
+import static tc.oc.pgm.util.Assert.assertNotNull;
+import static tc.oc.pgm.util.text.TemporalComponent.clock;
 
 import java.time.Duration;
 import java.util.Collection;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
+import net.kyori.adventure.text.Component;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.feature.FeatureInfo;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.VictoryCondition;
 import tc.oc.pgm.features.SelfIdentifyingFeatureDefinition;
-import tc.oc.pgm.util.TimeUtils;
 import tc.oc.pgm.util.collection.RankedSet;
 
 @FeatureInfo(name = "time-limit")
 public class TimeLimit extends SelfIdentifyingFeatureDefinition implements VictoryCondition {
-  private final Duration duration, overtime, maxOvertime;
+  private final Duration duration, overtime, maxOvertime, endOvertime;
   private final @Nullable VictoryCondition result;
   private final boolean show;
 
@@ -27,12 +26,14 @@ public class TimeLimit extends SelfIdentifyingFeatureDefinition implements Victo
       Duration duration,
       @Nullable Duration overtime,
       @Nullable Duration maxOvertime,
+      @Nullable Duration minOvertime,
       @Nullable VictoryCondition result,
       boolean show) {
     super(id);
-    this.duration = checkNotNull(duration);
+    this.duration = assertNotNull(duration);
     this.overtime = overtime;
     this.maxOvertime = maxOvertime;
+    this.endOvertime = minOvertime;
     this.result = result;
     this.show = show;
   }
@@ -47,6 +48,10 @@ public class TimeLimit extends SelfIdentifyingFeatureDefinition implements Victo
 
   public @Nullable Duration getMaxOvertime() {
     return maxOvertime;
+  }
+
+  public @Nullable Duration getEndOvertime() {
+    return endOvertime;
   }
 
   public @Nullable VictoryCondition getResult() {
@@ -73,8 +78,7 @@ public class TimeLimit extends SelfIdentifyingFeatureDefinition implements Victo
 
   @Override
   public boolean isCompleted(Match match) {
-    TimeLimitCountdown countdown = match.needModule(TimeLimitMatchModule.class).getCountdown();
-    return countdown != null && match.getCountdown().isFinished(countdown);
+    return match.needModule(TimeLimitMatchModule.class).isFinished();
   }
 
   public @Nullable Competitor currentWinner(Match match) {
@@ -100,11 +104,10 @@ public class TimeLimit extends SelfIdentifyingFeatureDefinition implements Victo
 
   @Override
   public Component getDescription(Match match) {
-    Component time = TextComponent.of(TimeUtils.formatDuration(duration));
     if (result == null) {
-      return TranslatableComponent.of("match.timeLimit.generic", time);
+      return translatable("match.timeLimit.generic", clock(duration));
     } else {
-      return TranslatableComponent.of("match.timeLimit.result", result.getDescription(match), time);
+      return translatable("match.timeLimit.result", result.getDescription(match), clock(duration));
     }
   }
 

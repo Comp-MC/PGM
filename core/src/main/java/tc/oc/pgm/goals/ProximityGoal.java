@@ -1,15 +1,19 @@
 package tc.oc.pgm.goals;
 
+import static net.kyori.adventure.text.Component.empty;
+import static net.kyori.adventure.text.Component.text;
+
 import java.util.Map;
-import javax.annotation.Nullable;
-import net.md_5.bungee.api.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Location;
 import org.bukkit.block.BlockState;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
-import tc.oc.pgm.api.event.CoarsePlayerMoveEvent;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.Party;
@@ -24,6 +28,7 @@ import tc.oc.pgm.goals.events.GoalTouchEvent;
 import tc.oc.pgm.util.LegacyFormatUtils;
 import tc.oc.pgm.util.block.BlockVectors;
 import tc.oc.pgm.util.collection.DefaultMapAdapter;
+import tc.oc.pgm.util.event.PlayerCoarseMoveEvent;
 
 public abstract class ProximityGoal<T extends ProximityGoalDefinition> extends OwnedGoal<T>
     implements Listener {
@@ -160,12 +165,14 @@ public abstract class ProximityGoal<T extends ProximityGoalDefinition> extends O
         && (viewer == team || viewer.isObserving());
   }
 
-  public ChatColor renderProximityColor(Competitor team, Party viewer) {
-    return ChatColor.GRAY;
+  public TextColor renderProximityColor(Competitor team, Party viewer) {
+    return NamedTextColor.GRAY;
   }
 
-  public String renderProximity(@Nullable Competitor team, Party viewer) {
-    if (!shouldShowProximity(team, viewer)) return "";
+  public Component renderProximity(@Nullable Competitor team, Party viewer) {
+    if (!shouldShowProximity(team, viewer)) {
+      return empty();
+    }
 
     String text;
     double distance = this.getMinimumDistance(team);
@@ -175,11 +182,11 @@ public abstract class ProximityGoal<T extends ProximityGoalDefinition> extends O
       text = LegacyFormatUtils.tiny(String.format("%.1f", distance));
     }
 
-    return renderProximityColor(team, viewer) + text;
+    return text(text, renderProximityColor(team, viewer));
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void onPlayerMove(CoarsePlayerMoveEvent event) {
+  public void onPlayerMove(PlayerCoarseMoveEvent event) {
     MatchPlayer player = getMatch().getParticipant(event.getPlayer());
     if (player != null
         && getProximityMetricType(player.getCompetitor()) == ProximityMetric.Type.CLOSEST_PLAYER) {

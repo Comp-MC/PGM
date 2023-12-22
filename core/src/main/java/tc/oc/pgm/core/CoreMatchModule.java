@@ -1,10 +1,10 @@
 package tc.oc.pgm.core;
 
+import static net.kyori.adventure.text.Component.translatable;
 import static tc.oc.pgm.api.map.MapProtos.MODES_IMPLEMENTATION_VERSION;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import net.kyori.text.TranslatableComponent;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.minecart.ExplosiveMinecart;
@@ -26,6 +26,7 @@ import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.ParticipantBlockTransformEvent;
+import tc.oc.pgm.goals.ShowOption;
 import tc.oc.pgm.goals.events.GoalCompleteEvent;
 import tc.oc.pgm.goals.events.GoalStatusChangeEvent;
 import tc.oc.pgm.modes.ObjectiveModeChangeEvent;
@@ -42,6 +43,10 @@ public class CoreMatchModule implements MatchModule, Listener {
     this.cores = cores;
   }
 
+  public List<Core> getCores() {
+    return this.cores;
+  }
+
   @Override
   public void enable() {
     if (this.match.getMap().getProto().isOlderThan(MODES_IMPLEMENTATION_VERSION)) {
@@ -56,7 +61,7 @@ public class CoreMatchModule implements MatchModule, Listener {
   public void leakCheck(final BlockTransformEvent event) {
     if (event.getWorld() != this.match.getWorld()) return;
 
-    if (event.getNewState().getMaterial() == Material.STATIONARY_LAVA) {
+    if (event.getNewState().getType() == Material.STATIONARY_LAVA) {
       Vector blockVector = BlockVectors.center(event.getNewState()).toVector();
       // Vector ensuring it's inside leak region if it's above
       Vector minVector = blockVector.clone().setY(0.5);
@@ -93,7 +98,7 @@ public class CoreMatchModule implements MatchModule, Listener {
             Competitor team = player.getParty();
 
             if (team == core.getOwner()) {
-              event.setCancelled(true, TranslatableComponent.of("core.damageOwn"));
+              event.setCancelled(translatable("objective.damageOwn", core.getComponentName()));
             } else if (event.getOldState().getData().equals(core.getMaterial())) {
               this.match.callEvent(new CoreBlockBreakEvent(core, player, event.getOldState()));
               core.touch(player);
@@ -134,7 +139,7 @@ public class CoreMatchModule implements MatchModule, Listener {
           && core.getCasingRegion().contains(center)
           && player.getParty() == core.getOwner()) {
         event.setCancelled(true);
-        player.sendWarning(TranslatableComponent.of("core.damageOwn"));
+        player.sendWarning(translatable("objective.damageOwn", core.getComponentName()));
       }
     }
   }
@@ -151,11 +156,15 @@ public class CoreMatchModule implements MatchModule, Listener {
     }
   }
 
-  @EventHandler(priority = EventPriority.MONITOR)
+  @EventHandler(priority = EventPriority.HIGHEST)
   public void onObjectiveModeSwitch(final ObjectiveModeChangeEvent event) {
     for (Core core : this.cores) {
-      if (core.isAffectedByModeChanges()) {
+      if (core.getModes() == null || core.getModes().contains(event.getMode())) {
         core.replaceBlocks(event.getMode().getMaterialData());
+        // if at least one of the cores are visible, the mode change message will be sent
+        if (core.hasShowOption(ShowOption.SHOW_MESSAGES)) {
+          event.setVisible(true);
+        }
       }
     }
   }

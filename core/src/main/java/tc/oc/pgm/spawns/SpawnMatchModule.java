@@ -1,5 +1,7 @@
 package tc.oc.pgm.spawns;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import java.util.ArrayList;
@@ -8,8 +10,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
-import javax.annotation.Nullable;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -19,11 +22,11 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.PlayerAttackEntityEvent;
-import org.bukkit.event.player.PlayerInitialSpawnEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
+import org.jetbrains.annotations.Nullable;
+import org.spigotmc.event.player.PlayerSpawnLocationEvent;
 import tc.oc.pgm.api.PGM;
-import tc.oc.pgm.api.event.PlayerItemTransferEvent;
+import tc.oc.pgm.api.filter.Filter;
+import tc.oc.pgm.api.filter.query.Query;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
@@ -35,17 +38,22 @@ import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.event.CompetitorRemoveEvent;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.event.MatchPlayerDeathEvent;
+import tc.oc.pgm.api.player.event.ObserverInteractEvent;
 import tc.oc.pgm.api.time.Tick;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.PlayerJoinPartyEvent;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
-import tc.oc.pgm.modules.EventFilterMatchModule;
 import tc.oc.pgm.spawns.states.Joining;
 import tc.oc.pgm.spawns.states.Observing;
 import tc.oc.pgm.spawns.states.State;
+import tc.oc.pgm.util.event.PlayerItemTransferEvent;
+import tc.oc.pgm.util.event.player.PlayerAttackEntityEvent;
 
+@SuppressWarnings("UnstableApiUsage")
 @ListenerScope(MatchScope.LOADED)
 public class SpawnMatchModule implements MatchModule, Listener, Tickable {
+
+  private static final long PREDICTED_EXTRA_TICKS = 10 * 20;
 
   private final Match match;
   private final SpawnModule module;
@@ -54,6 +62,8 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
   private final Map<Competitor, Spawn> unique = new HashMap<>();
   private final Set<Spawn> failed = new HashSet<>();
   private final ObserverToolFactory observerToolFactory;
+  private final Cache<UUID, Long> deathTicks =
+      CacheBuilder.newBuilder().expireAfterWrite(60, TimeUnit.SECONDS).build();
 
   public SpawnMatchModule(Match match, SpawnModule module) {
     this.match = match;
@@ -65,8 +75,11 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
     return match;
   }
 
-  public RespawnOptions getRespawnOptions() {
-    return module.respawnOptions;
+  public RespawnOptions getRespawnOptions(Query query) {
+    return module.respawnOptions.stream()
+        .filter(respawn -> respawn.filter.query(query) == Filter.QueryResponse.ALLOW)
+        .findFirst()
+        .orElseThrow(() -> new IllegalStateException("No respawn option could be used"));
   }
 
   public Spawn getDefaultSpawn() {
@@ -164,12 +177,20 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
     }
   }
 
+  public long getDeathTick(MatchPlayer player) {
+    Long deathTick = deathTicks.getIfPresent(player.getId());
+    return deathTick != null ? deathTick : 0;
+  }
+
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onPartyChange(final PlayerPartyChangeEvent event) {
     if (event.getOldParty() == null) {
       // Join match
       if (event.getNewParty().isParticipating()) {
-        transition(event.getPlayer(), null, new Joining(this, event.getPlayer()));
+        transition(
+            event.getPlayer(),
+            null,
+            new Joining(this, event.getPlayer(), getDeathTick(event.getPlayer())));
       } else {
         transition(event.getPlayer(), null, new Observing(this, event.getPlayer(), true, true));
       }
@@ -211,13 +232,10 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
     }
   }
 
-  /**
-   * This handler must run after {@link EventFilterMatchModule#onInteract(PlayerInteractEvent)} and
-   * before the event handler in WorldEdit for compass clicking.
-   */
-  @EventHandler(priority = EventPriority.LOW)
-  public void onInteract(final PlayerInteractEvent event) {
-    MatchPlayer player = match.getPlayer(event.getPlayer());
+  // Listen on HIGH so the picker can handle this first
+  @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+  public void onObserverInteract(final ObserverInteractEvent event) {
+    MatchPlayer player = event.getPlayer();
     if (player != null) {
       State state = states.get(player);
       if (state != null) state.onEvent(event);
@@ -268,7 +286,7 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
-  public void onInitialSpawn(final PlayerInitialSpawnEvent event) {
+  public void onInitialSpawn(final PlayerSpawnLocationEvent event) {
     // Ensure the player spawns in the match world
     event.setSpawnLocation(match.getWorld().getSpawnLocation());
   }
@@ -305,6 +323,17 @@ public class SpawnMatchModule implements MatchModule, Listener, Tickable {
         unique.remove(competitor);
       }
     }
+  }
+
+  @EventHandler(ignoreCancelled = true)
+  public void onPlayerDeath(MatchPlayerDeathEvent event) {
+    long tick = event.getMatch().getTick().tick;
+
+    if (event.isPredicted()) {
+      tick = tick + PREDICTED_EXTRA_TICKS;
+    }
+
+    deathTicks.put(event.getPlayer().getId(), tick);
   }
 
   @Override

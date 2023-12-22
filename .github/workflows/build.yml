@@ -1,28 +1,30 @@
-name: build
+name: Build
 on:
   pull_request:
-  repository_dispatch:
+  workflow_dispatch:
 jobs:
   build:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-    - name: checkout
-      uses: actions/checkout@v1
-    - name: setup
-      uses: actions/setup-java@v1
+    - id: checkout
+      name: Checkout
+      uses: actions/checkout@v3
+    - id: setup-java
+      name: Setup Java
+      uses: actions/setup-java@v3
       with:
-        java-version: 1.8
-    - name: cache
-      uses: actions/cache@v1
-      with:
-        path: ~/.m2/repository
-        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-        restore-keys: |
-          ${{ runner.os }}-maven-
-    - name: build
+        java-version: 8
+        distribution: temurin
+        cache: maven
+    - id: build
+      name: Build
       run: mvn install
-    - name: artifact
-      uses: actions/upload-artifact@v1
+    - id: artifact
+      name: Upload Jar
+      uses: actions/upload-artifact@v3
       with:
         name: PGM.jar
         path: target/PGM.jar
+        if-no-files-found: error

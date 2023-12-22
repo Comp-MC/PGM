@@ -6,6 +6,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.material.MaterialData;
 import org.bukkit.util.BlockVector;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 public interface BlockStates {
 
@@ -37,7 +38,7 @@ public interface BlockStates {
 
   static BlockState create(World world, BlockVector pos, MaterialData materialData) {
     BlockState state = pos.toLocation(world).getBlock().getState();
-    state.setMaterialData(materialData);
+    NMSHacks.setBlockStateData(state, materialData);
     return state;
   }
 
@@ -49,7 +50,7 @@ public interface BlockStates {
         + ", "
         + state.getZ()
         + ") world="
-        + state.getMaterialData()
+        + state.getData()
         + "}";
   }
 }

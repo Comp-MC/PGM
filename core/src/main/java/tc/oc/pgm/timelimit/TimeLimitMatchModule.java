@@ -1,7 +1,7 @@
 package tc.oc.pgm.timelimit;
 
 import java.time.Duration;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.party.VictoryCondition;
@@ -12,6 +12,7 @@ public class TimeLimitMatchModule implements MatchModule {
   private @Nullable TimeLimit timeLimit;
   private @Nullable TimeLimitCountdown countdown;
   private @Nullable OvertimeCountdown overtime;
+  private boolean finished; // If Time limit ended this match
 
   public TimeLimitMatchModule(Match match, @Nullable TimeLimit timeLimit) {
     this.match = match;
@@ -26,6 +27,14 @@ public class TimeLimitMatchModule implements MatchModule {
   @Override
   public void enable() {
     this.start();
+  }
+
+  public boolean isFinished() {
+    return finished;
+  }
+
+  public void setFinished(boolean finished) {
+    this.finished = finished;
   }
 
   public @Nullable TimeLimit getTimeLimit() {

@@ -1,19 +1,18 @@
 package tc.oc.pgm.listeners;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static net.kyori.adventure.text.Component.space;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
 
-import java.util.Collection;
+import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.stream.Collectors;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
-import net.md_5.bungee.api.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.Server;
 import org.bukkit.entity.EnderPearl;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
@@ -31,44 +30,54 @@ import org.bukkit.event.player.PlayerLoginEvent.Result;
 import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.vehicle.VehicleUpdateEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
+import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.event.BlockTransformEvent;
+import tc.oc.pgm.api.map.GameRule;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchManager;
 import tc.oc.pgm.api.match.event.MatchFinishEvent;
 import tc.oc.pgm.api.match.event.MatchLoadEvent;
 import tc.oc.pgm.api.match.event.MatchStartEvent;
 import tc.oc.pgm.api.player.MatchPlayer;
-import tc.oc.pgm.api.player.VanishManager;
-import tc.oc.pgm.api.setting.SettingKey;
-import tc.oc.pgm.api.setting.SettingValue;
 import tc.oc.pgm.events.MapPoolAdjustEvent;
-import tc.oc.pgm.events.PlayerParticipationStopEvent;
+import tc.oc.pgm.events.PlayerJoinMatchEvent;
+import tc.oc.pgm.events.PlayerLeavePartyEvent;
 import tc.oc.pgm.gamerules.GameRulesMatchModule;
-import tc.oc.pgm.modules.TimeLockModule;
+import tc.oc.pgm.modules.WorldTimeModule;
 import tc.oc.pgm.util.UsernameFormatUtils;
-import tc.oc.pgm.util.named.NameStyle;
-import tc.oc.pgm.util.text.PeriodFormats;
+import tc.oc.pgm.util.bukkit.WorldBorders;
+import tc.oc.pgm.util.event.PlayerCoarseMoveEvent;
+import tc.oc.pgm.util.nms.NMSHacks;
+import tc.oc.pgm.util.skin.Skin;
+import tc.oc.pgm.util.text.TemporalComponent;
 import tc.oc.pgm.util.text.TextTranslations;
 
 public class PGMListener implements Listener {
-  private static final String DO_DAYLIGHT_CYCLE = "doDaylightCycle";
+  /*
+  1000  /time set day
+  6000  noon, sun is at its peak
+  12610 dusk
+  13000 /time set night
+  14000
+  18000 midnight, moon is at its peak
+  */
+  private static final long[] WORLD_TIMES = {1000, 6000, 12610, 13000, 14000, 18000};
 
   private final Plugin parent;
   private final MatchManager mm;
-  private final VanishManager vm;
 
   // Single-write, multi-read lock used to create the first match
   private final ReentrantReadWriteLock lock;
 
-  public PGMListener(Plugin parent, MatchManager mm, VanishManager vm) {
+  public PGMListener(Plugin parent, MatchManager mm) {
     this.parent = parent;
     this.mm = mm;
-    this.vm = vm;
     this.lock = new ReentrantReadWriteLock();
   }
 
@@ -80,10 +89,7 @@ public class PGMListener implements Listener {
     // Create the match when the first player joins
     if (lock.writeLock().tryLock()) {
       // If the server is suspended, need to release so match can be created
-      final Server server = parent.getServer();
-      if (server.isSuspended()) {
-        server.setSuspended(false);
-      }
+      NMSHacks.resumeServer();
 
       try {
         mm.createMatch(null).get();
@@ -106,7 +112,7 @@ public class PGMListener implements Listener {
     if (!mm.getMatches().hasNext()) {
       event.disallow(
           AsyncPlayerPreLoginEvent.Result.KICK_OTHER,
-          TextTranslations.translate("misc.incorrectWorld", null));
+          TextTranslations.translate("misc.incorrectWorld"));
     }
   }
 
@@ -124,7 +130,11 @@ public class PGMListener implements Listener {
 
   @EventHandler(priority = EventPriority.LOW)
   public void addPlayerOnJoin(final PlayerJoinEvent event) {
-    if (this.mm.getMatch(event.getWorld()) == null) {
+    // Player already left. Because quit already happened, we must ignore the join.
+    if (!event.getPlayer().isOnline()) return;
+
+    Match match = this.mm.getMatch(event.getPlayer().getWorld());
+    if (match == null) {
       event
           .getPlayer()
           .kickPlayer(
@@ -138,81 +148,15 @@ public class PGMListener implements Listener {
       return;
     }
 
-    this.mm.getMatch(event.getWorld()).addPlayer(event.getPlayer());
-  }
-
-  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void broadcastJoinMessage(final PlayerJoinEvent event) {
-    // Handle join message and send it to all players except the one joining
-    Match match = this.mm.getMatch(event.getWorld());
-    if (match == null) return;
-
-    if (event.getJoinMessage() != null) {
-      event.setJoinMessage(null);
-      MatchPlayer player = match.getPlayer(event.getPlayer());
-      if (player != null) {
-        if (!vm.isVanished(player.getId())) {
-          announceJoinOrLeave(player, true, false);
-        } else {
-          // Announce actual staff join
-          announceJoinOrLeave(player, true, true);
-        }
-      }
-    }
+    match.addPlayer(event.getPlayer());
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void removePlayerOnDisconnect(PlayerQuitEvent event) {
-    Match match = this.mm.getMatch(event.getWorld());
-    if (match == null) return;
+    MatchPlayer player = this.mm.getPlayer(event.getPlayer());
+    if (player == null) return;
 
-    if (event.getQuitMessage() != null) {
-      MatchPlayer player = match.getPlayer(event.getPlayer());
-      if (player != null) {
-        if (!vm.isVanished(player.getId())) {
-          announceJoinOrLeave(player, false, false);
-        } else {
-          // Announce actual staff quit
-          announceJoinOrLeave(player, false, true);
-        }
-      }
-      event.setQuitMessage(null);
-    }
-
-    match.removePlayer(event.getPlayer());
-  }
-
-  public static void announceJoinOrLeave(MatchPlayer player, boolean join, boolean staffOnly) {
-    announceJoinOrLeave(player, join, staffOnly, false);
-  }
-
-  public static void announceJoinOrLeave(
-      MatchPlayer player, boolean join, boolean staffOnly, boolean force) {
-    checkNotNull(player);
-    Collection<MatchPlayer> viewers =
-        player.getMatch().getPlayers().stream()
-            .filter(p -> !staffOnly || p.getBukkit().hasPermission(Permissions.STAFF))
-            .collect(Collectors.toList());
-
-    for (MatchPlayer viewer : viewers) {
-      if (player.equals(viewer)) continue;
-      if (!staffOnly && player.isVanished() && viewer.getBukkit().hasPermission(Permissions.STAFF))
-        continue; // Skip staff during fake broadcast
-
-      final String key =
-          (join ? "misc.join" : "misc.leave")
-              + (staffOnly && (player.isVanished() || force) ? ".quiet" : "");
-
-      SettingValue option = viewer.getSettings().getValue(SettingKey.JOIN);
-      if (option.equals(SettingValue.JOIN_ON)) {
-        Component component =
-            TranslatableComponent.of(key, TextColor.YELLOW, player.getName(NameStyle.CONCISE));
-        viewer.sendMessage(
-            staffOnly
-                ? ChatDispatcher.ADMIN_CHAT_PREFIX.append(component.color(TextColor.YELLOW))
-                : component.color(TextColor.YELLOW));
-      }
-    }
+    player.getMatch().removePlayer(event.getPlayer());
   }
 
   @EventHandler(ignoreCancelled = true)
@@ -227,7 +171,7 @@ public class PGMListener implements Listener {
   // sometimes arrows stuck in players persist through deaths
   @EventHandler
   public void fixStuckArrows(final PlayerRespawnEvent event) {
-    event.getPlayer().setArrowsStuck(0);
+    NMSHacks.clearArrowsInPlayer(event.getPlayer());
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -240,7 +184,7 @@ public class PGMListener implements Listener {
   }
 
   // fix item pickup to work the way it should
-  @EventHandler(priority = EventPriority.HIGHEST)
+  @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
   public void handleItemPickup(final PlayerPickupItemEvent event) {
     Player nearestPlayer = event.getPlayer();
     double closestDistance =
@@ -258,33 +202,71 @@ public class PGMListener implements Listener {
     if (nearestPlayer != event.getPlayer()) event.setCancelled(true);
   }
 
+  @EventHandler
+  public void lockFireTick(final MatchLoadEvent event) {
+    setGameRule(event, GameRule.DO_FIRE_TICK.getId(), false);
+  }
+
+  @EventHandler
+  public void unlockFireTick(final MatchStartEvent event) {
+    event
+        .getMatch()
+        .getWorld()
+        .setGameRuleValue(
+            GameRule.DO_FIRE_TICK.getId(),
+            event
+                .getMatch()
+                .needModule(GameRulesMatchModule.class)
+                .getGameRule(GameRule.DO_FIRE_TICK.getId()));
+  }
+
+  @EventHandler
+  public void lockFireTick(final MatchFinishEvent event) {
+    setGameRule(event, GameRule.DO_FIRE_TICK.getId(), false);
+  }
+
   //
   // Time Lock
   // lock time before, during (if time lock enabled), and after the match
   //
   @EventHandler
   public void lockTime(final MatchLoadEvent event) {
-    event.getMatch().getWorld().setGameRuleValue(DO_DAYLIGHT_CYCLE, Boolean.toString(false));
+    setGameRule(event, GameRule.DO_DAYLIGHT_CYCLE.getId(), false);
   }
 
   @EventHandler
   public void unlockTime(final MatchStartEvent event) {
-    boolean unlockTime = false;
-    if (!event.getMatch().getModule(TimeLockModule.class).isTimeLocked()) {
-      unlockTime = true;
-    }
-
-    GameRulesMatchModule gameRulesModule = event.getMatch().getModule(GameRulesMatchModule.class);
-    if (gameRulesModule != null && gameRulesModule.getGameRules().containsKey(DO_DAYLIGHT_CYCLE)) {
-      unlockTime = Boolean.parseBoolean(gameRulesModule.getGameRules().get(DO_DAYLIGHT_CYCLE));
-    }
-
-    event.getMatch().getWorld().setGameRuleValue(DO_DAYLIGHT_CYCLE, Boolean.toString(unlockTime));
+    event
+        .getMatch()
+        .getWorld()
+        .setGameRuleValue(
+            GameRule.DO_DAYLIGHT_CYCLE.getId(),
+            event
+                .getMatch()
+                .needModule(GameRulesMatchModule.class)
+                .getGameRule(GameRule.DO_DAYLIGHT_CYCLE.getId()));
   }
 
   @EventHandler
   public void lockTime(final MatchFinishEvent event) {
-    event.getMatch().getWorld().setGameRuleValue(DO_DAYLIGHT_CYCLE, Boolean.toString(false));
+    setGameRule(event, GameRule.DO_DAYLIGHT_CYCLE.getId(), false);
+  }
+
+  @EventHandler
+  public void setTime(final MatchLoadEvent event) {
+    Long time = event.getMatch().getModule(WorldTimeModule.class).getTime();
+    if (time != null) {
+      event.getMatch().getWorld().setTime(time);
+    }
+  }
+
+  @EventHandler
+  public void randomTime(final MatchLoadEvent event) {
+    if (event.getMatch().getModule(WorldTimeModule.class).isTimeRandom()) {
+      Random rand = event.getMatch().getRandom();
+      long time = WORLD_TIMES[rand.nextInt(WORLD_TIMES.length)];
+      event.getMatch().getWorld().setTime(time);
+    }
   }
 
   @EventHandler
@@ -295,7 +277,7 @@ public class PGMListener implements Listener {
 
   @EventHandler
   public void freezeVehicle(final VehicleUpdateEvent event) {
-    Match match = this.mm.getMatch(event.getWorld());
+    Match match = this.mm.getMatch(event.getVehicle().getWorld());
     if (match == null || match.isFinished()) {
       event.getVehicle().setVelocity(new Vector());
     }
@@ -312,18 +294,18 @@ public class PGMListener implements Listener {
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void dropItemsOnQuit(PlayerParticipationStopEvent event) {
+  public void dropItemsOnQuit(PlayerLeavePartyEvent event) {
     MatchPlayer quitter = event.getPlayer();
     if (!quitter.isAlive()) return;
 
     for (ItemStack item : quitter.getInventory().getContents()) {
       if (item == null || item.getType() == Material.AIR) continue;
-      quitter.getWorld().dropItemNaturally(quitter.getBukkit().getLocation(), item);
+      quitter.getBukkit().getWorld().dropItemNaturally(quitter.getBukkit().getLocation(), item);
     }
 
     for (ItemStack armor : quitter.getInventory().getArmorContents()) {
       if (armor == null || armor.getType() == Material.AIR) continue;
-      quitter.getWorld().dropItemNaturally(quitter.getBukkit().getLocation(), armor);
+      quitter.getBukkit().getWorld().dropItemNaturally(quitter.getBukkit().getLocation(), armor);
     }
   }
 
@@ -331,58 +313,96 @@ public class PGMListener implements Listener {
   public void announceDynamicMapPoolChange(MapPoolAdjustEvent event) {
     // Send feedback to staff, alerting them that the map pool has changed by force
     if (event.isForced()) {
-      Component poolName = TextComponent.of(event.getNewPool().getName(), TextColor.LIGHT_PURPLE);
+      Component poolName = text(event.getNewPool().getName(), NamedTextColor.LIGHT_PURPLE);
       Component staffName =
           UsernameFormatUtils.formatStaffName(event.getSender(), event.getMatch());
       Component matchLimit =
-          TextComponent.builder()
-              .append(Integer.toString(event.getMatchLimit()), TextColor.GREEN)
-              .append(" ")
+          text()
+              .append(text(event.getMatchLimit(), NamedTextColor.GREEN))
+              .append(space())
               .append(
-                  TranslatableComponent.of(
-                      "match.name" + (event.getMatchLimit() != 1 ? ".plural" : ""), TextColor.GRAY))
+                  translatable(
+                      "match.name" + (event.getMatchLimit() != 1 ? ".plural" : ""),
+                      NamedTextColor.GRAY))
               .build();
 
       // No limit
-      Component forced = TranslatableComponent.of("pool.change.force", poolName, staffName);
+      Component forced = translatable("pool.change.force", poolName, staffName);
       if (event.getTimeLimit() != null) {
         Component time =
-            PeriodFormats.briefNaturalApproximate(event.getTimeLimit()).color(TextColor.GREEN);
+            TemporalComponent.briefNaturalApproximate(event.getTimeLimit())
+                .color(NamedTextColor.GREEN);
 
         // If time & match limit are present, display both
         if (event.getMatchLimit() != 0) {
-          Component timeAndLimit =
-              TranslatableComponent.of("misc.or", TextColor.GRAY, time, matchLimit);
-          forced =
-              TranslatableComponent.of("pool.change.forceTimed", poolName, timeAndLimit, staffName);
+          Component timeAndLimit = translatable("misc.or", NamedTextColor.GRAY, time, matchLimit);
+          forced = translatable("pool.change.forceTimed", poolName, timeAndLimit, staffName);
         } else {
           // Just time limit
-          forced = TranslatableComponent.of("pool.change.forceTimed", poolName, time, staffName);
+          forced = translatable("pool.change.forceTimed", poolName, time, staffName);
         }
       } else if (event.getMatchLimit() != 0) {
         // Just match limit
-        forced =
-            TranslatableComponent.of("pool.change.forceTimed", poolName, matchLimit, staffName);
+        forced = translatable("pool.change.forceTimed", poolName, matchLimit, staffName);
       }
 
-      ChatDispatcher.broadcastAdminChatMessage(forced.color(TextColor.GRAY), event.getMatch());
+      ChatDispatcher.broadcastAdminChatMessage(forced.color(NamedTextColor.GRAY), event.getMatch());
     }
 
     // Broadcast map pool changes due to size
     if (event.getNewPool().isDynamic()) {
       Component broadcast =
-          TextComponent.builder()
-              .append("[", TextColor.WHITE)
-              .append(TranslatableComponent.of("pool.name", TextColor.GOLD))
-              .append("] ", TextColor.WHITE)
+          text()
+              .append(text("[", NamedTextColor.WHITE))
+              .append(translatable("pool.name", NamedTextColor.GOLD))
+              .append(text("] ", NamedTextColor.WHITE))
               .append(
-                  TranslatableComponent.of(
+                  translatable(
                       "pool.change",
-                      TextColor.GREEN,
-                      TextComponent.of(event.getNewPool().getName(), TextColor.AQUA)))
+                      NamedTextColor.GREEN,
+                      text(event.getNewPool().getName(), NamedTextColor.AQUA)))
               .build();
 
       event.getMatch().sendMessage(broadcast);
+    }
+  }
+
+  @EventHandler // We only need to store skins for the post match stats
+  public void storeSkinOnMatchJoin(PlayerJoinMatchEvent event) {
+    final MatchPlayer player = event.getPlayer();
+    Skin playerSkin = NMSHacks.getPlayerSkin(player.getBukkit());
+    if (playerSkin != null) {
+      PGM.get().getDatastore().setSkin(player.getId(), playerSkin);
+    }
+  }
+
+  public void setGameRule(MatchLoadEvent event, String gameRule, boolean gameRuleValue) {
+    event.getMatch().getWorld().setGameRuleValue(gameRule, Boolean.toString(gameRuleValue));
+  }
+
+  public void setGameRule(MatchFinishEvent event, String gameRule, boolean gameRuleValue) {
+    event.getMatch().getWorld().setGameRuleValue(gameRule, Boolean.toString(gameRuleValue));
+  }
+
+  /** Prevent teleporting outside the border */
+  @EventHandler(priority = EventPriority.HIGH)
+  public void onPlayerTeleport(final PlayerTeleportEvent event) {
+    if (event.getCause() == PlayerTeleportEvent.TeleportCause.PLUGIN) {
+      if (WorldBorders.isInsideBorder(event.getFrom())
+          && !WorldBorders.isInsideBorder(event.getTo())) {
+        event.setCancelled(true);
+      }
+    }
+  }
+
+  @EventHandler(priority = EventPriority.HIGH)
+  public void onPlayerMove(final PlayerCoarseMoveEvent event) {
+    MatchPlayer player = PGM.get().getMatchManager().getPlayer(event.getPlayer());
+    if (player != null && player.isObserving()) {
+      Location location = event.getTo();
+      if (WorldBorders.clampToBorder(location)) {
+        event.setTo(location);
+      }
     }
   }
 }

@@ -1,13 +1,14 @@
 package tc.oc.pgm.wool;
 
+import static net.kyori.adventure.text.Component.translatable;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.TimeUnit;
-import net.kyori.text.Component;
-import net.kyori.text.TranslatableComponent;
+import net.kyori.adventure.text.Component;
 import org.bukkit.DyeColor;
 import org.bukkit.Material;
 import org.bukkit.block.BlockState;
@@ -22,6 +23,7 @@ import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.Recipe;
 import org.bukkit.util.Vector;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.event.BlockTransformEvent;
@@ -183,10 +185,9 @@ public class WoolMatchModule implements MatchModule, Listener {
     if (player != null) { // wool can only be placed by a player
       Component woolName = wool.getComponentName();
       if (!isValidWool(wool.getDyeColor(), event.getNewState())) {
-        player.sendWarning(TranslatableComponent.of("wool.wrongWool", woolName));
+        player.sendWarning(translatable("wool.wrongWool", woolName));
       } else if (wool.getOwner() != player.getParty()) {
-        player.sendWarning(
-            TranslatableComponent.of("wool.wrongTeam", wool.getOwner().getName(), woolName));
+        player.sendWarning(translatable("wool.wrongTeam", wool.getOwner().getName(), woolName));
       } else {
         event.setCancelled(false);
         wool.markPlaced();
@@ -205,7 +206,10 @@ public class WoolMatchModule implements MatchModule, Listener {
 
   @EventHandler
   public void handleWoolCrafting(PrepareItemCraftEvent event) {
-    ItemStack result = event.getRecipe().getResult();
+    Recipe recipe = event.getRecipe();
+    if (recipe == null) return;
+
+    ItemStack result = recipe.getResult();
     InventoryHolder holder = event.getInventory().getHolder();
 
     if (holder instanceof Player) {
@@ -216,7 +220,7 @@ public class WoolMatchModule implements MatchModule, Listener {
           if (wool.getDefinition().isObjectiveWool(result)) {
             if (!wool.getDefinition().isCraftable()) {
               playerHolder.sendWarning(
-                  TranslatableComponent.of("wool.craftingDisabled", wool.getComponentName()));
+                  translatable("wool.craftingDisabled", wool.getComponentName()));
               event.getInventory().setResult(null);
             }
           }

@@ -1,7 +1,6 @@
 package tc.oc.pgm.tnt;
 
 import java.util.Random;
-import javax.annotation.Nullable;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -15,16 +14,17 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
-import org.bukkit.event.entity.ExplosionPrimeByEntityEvent;
 import org.bukkit.event.entity.ExplosionPrimeEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.event.BlockTransformEvent;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.util.TimeUtils;
+import tc.oc.pgm.util.event.entity.ExplosionPrimeByEntityEvent;
 
 @ListenerScope(MatchScope.RUNNING)
 public class TNTMatchModule implements MatchModule, Listener {
@@ -47,10 +47,12 @@ public class TNTMatchModule implements MatchModule, Listener {
   }
 
   private boolean callPrimeEvent(TNTPrimed tnt, @Nullable Entity primer) {
-    ExplosionPrimeEvent primeEvent =
-        primer != null
-            ? new ExplosionPrimeByEntityEvent(tnt, primer)
-            : new ExplosionPrimeEvent(tnt);
+    ExplosionPrimeEvent primeEvent;
+    if (primer != null) {
+      primeEvent = new ExplosionPrimeByEntityEvent(tnt, primer);
+    } else {
+      primeEvent = new ExplosionPrimeEvent(tnt);
+    }
     match.callEvent(primeEvent);
     if (primeEvent.isCancelled()) {
       tnt.remove();
@@ -64,6 +66,17 @@ public class TNTMatchModule implements MatchModule, Listener {
   public void yieldSet(EntityExplodeEvent event) {
     if (this.properties.yield != null && event.getEntity() instanceof TNTPrimed) {
       event.setYield(this.properties.yield);
+    }
+  }
+
+  private static Sound FUSE_SOUND = chooseFuseSound();
+
+  private static Sound chooseFuseSound() {
+    try {
+      return Sound.FUSE;
+    } catch (NoSuchFieldError error) {
+      // TODO: make or use a 1.8 -> 1.9+ sound conversion api
+      return Sound.valueOf("ENTITY_TNT_PRIMED");
     }
   }
 
@@ -86,7 +99,7 @@ public class TNTMatchModule implements MatchModule, Listener {
 
       if (callPrimeEvent(tnt, event.getPlayer())) {
         event.setCancelled(true); // Allow the block to be placed if priming is cancelled
-        world.playSound(tnt.getLocation(), Sound.FUSE, 1, 1);
+        world.playSound(tnt.getLocation(), FUSE_SOUND, 1, 1);
 
         ItemStack inHand = event.getPlayer().getItemInHand();
         if (inHand.getAmount() == 1) {

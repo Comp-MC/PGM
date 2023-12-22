@@ -1,11 +1,11 @@
 package tc.oc.pgm.api.map;
 
-import java.text.Normalizer;
 import java.time.LocalDate;
 import java.util.Collection;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
+import java.util.Map;
+import net.kyori.adventure.text.Component;
 import org.bukkit.command.CommandSender;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.util.Version;
 import tc.oc.pgm.util.named.MapNameStyle;
 import tc.oc.pgm.util.text.TextTranslations;
@@ -19,6 +19,24 @@ public interface MapInfo extends Comparable<MapInfo>, Cloneable {
    * @return A unique id.
    */
   String getId();
+
+  /**
+   * The map variant this info represents
+   *
+   * @return A variant for the map, if any.
+   */
+  String getVariantId();
+
+  /**
+   * Get all the variants available for the map
+   *
+   * @return a map of variants by their variant id
+   */
+  Map<String, VariantInfo> getVariants();
+
+  /** @return the subfolder in which the world is in, or null for the parent folder */
+  @Nullable
+  String getWorldFolder();
 
   /**
    * Get the proto of the map's {@link org.jdom2.Document}.
@@ -38,9 +56,16 @@ public interface MapInfo extends Comparable<MapInfo>, Cloneable {
   /**
    * Get a unique, human-readable name for the map.
    *
-   * @return A name, alphanumeric with spaces are allowed.
+   * @return A name, alphanumeric with spaces allowed.
    */
   String getName();
+
+  /**
+   * Get the maps' name, but normalized to standard english characters and lower case.
+   *
+   * @return The map's name, lowercase with spaces allowed.
+   */
+  String getNormalizedName();
 
   /**
    * Gets a styled map name.
@@ -109,11 +134,18 @@ public interface MapInfo extends Comparable<MapInfo>, Cloneable {
   Collection<MapTag> getTags();
 
   /**
-   * Get a {@link Component} that represents this map's gamemode name.
+   * Get a {@link Component} that represents this map's custom game title.
    *
-   * @return A component of the gamemode name if defined or null.
+   * @return Returns the defined gamemode title, empty if not defined.
    */
   Component getGamemode();
+
+  /**
+   * Get a {@link Collection<Gamemode>} that represents this map's gamemodes.
+   *
+   * @return A Collection of gamemodes if defined or null.
+   */
+  Collection<Gamemode> getGamemodes();
 
   /**
    * Get the maximum number of players that can participate on each team.
@@ -130,22 +162,46 @@ public interface MapInfo extends Comparable<MapInfo>, Cloneable {
   WorldInfo getWorld();
 
   /**
-   * Create an immutable copy of this info.
+   * Get the {@link Phase} for the map.
    *
-   * @return A cloned {@link MapInfo}.
+   * @return The {@link Phase}.
    */
-  MapInfo clone();
+  Phase getPhase();
+
+  /**
+   * Get whether friendly fire should be on or off.
+   *
+   * @return True if friendly fire is on.
+   */
+  boolean getFriendlyFire();
+
+  /**
+   * Get a {@link MapSource} to access the maps's files.
+   *
+   * @return A {@link MapSource}.
+   */
+  MapSource getSource();
+
+  /**
+   * Get the {@link MapContext} for this map, it may be null if the map unloaded
+   *
+   * @return A {@link MapContext} for this map, or null if unloaded.
+   */
+  @Nullable
+  MapContext getContext();
 
   @Override
   default int compareTo(MapInfo o) {
     return getId().compareTo(o.getId());
   }
 
-  static String normalizeName(@Nullable String idOrName) {
-    return idOrName == null
-        ? ""
-        : Normalizer.normalize(idOrName, Normalizer.Form.NFD)
-            .replaceAll("[^A-Za-z0-9]", "")
-            .toLowerCase();
+  interface VariantInfo {
+    String getVariantId();
+
+    String getMapId();
+
+    String getMapName();
+
+    String getWorld();
   }
 }

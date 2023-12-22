@@ -1,11 +1,18 @@
 package tc.oc.pgm.blitz;
 
+import static net.kyori.adventure.text.Component.empty;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+import static net.kyori.adventure.title.Title.title;
+import static tc.oc.pgm.util.TimeUtils.fromTicks;
+
+import com.google.common.collect.ImmutableSet;
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.title.Title;
 import org.bukkit.Effect;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -13,16 +20,22 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.util.Vector;
+import org.jetbrains.annotations.Nullable;
+import tc.oc.pgm.api.filter.Filter;
+import tc.oc.pgm.api.map.Gamemode;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.event.MatchPlayerDeathEvent;
+import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.PlayerParticipationStartEvent;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
+import tc.oc.pgm.join.JoinRequest;
 import tc.oc.pgm.spawns.events.ParticipantSpawnEvent;
 
+@ListenerScope(MatchScope.RUNNING)
 public class BlitzMatchModule implements MatchModule, Listener {
 
   private final Match match;
@@ -45,6 +58,10 @@ public class BlitzMatchModule implements MatchModule, Listener {
     return this.config;
   }
 
+  public Filter getScoreboardFilter() {
+    return config.getScoreboardFilter();
+  }
+
   /** Whether or not the player participated in the match and was eliminated. */
   public boolean isPlayerEliminated(UUID player) {
     return this.eliminatedPlayers.contains(player);
@@ -59,9 +76,20 @@ public class BlitzMatchModule implements MatchModule, Listener {
     return lifeManager.getLives(id);
   }
 
+  public void setLives(MatchPlayer matchPlayer, int lives) {
+    UUID id = matchPlayer.getId();
+    if (lives == lifeManager.getLives(id)) return;
+
+    lifeManager.setLives(id, lives);
+    if (this.config.getBroadcastLives()) {
+      this.showLivesTitle(matchPlayer);
+    }
+  }
+
   @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
   public void handleDeath(final MatchPlayerDeathEvent event) {
     MatchPlayer victim = event.getVictim();
+    if (config.getFilter().query(victim).isDenied()) return;
     if (victim.getParty() instanceof Competitor) {
       Competitor competitor = (Competitor) victim.getParty();
 
@@ -73,47 +101,59 @@ public class BlitzMatchModule implements MatchModule, Listener {
     }
   }
 
-  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+  @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
   public void handleLeave(final PlayerPartyChangeEvent event) {
     int lives = this.lifeManager.getLives(event.getPlayer().getId());
     if (event.getOldParty() instanceof Competitor && lives > 0) {
-      this.handleElimination(event.getPlayer(), (Competitor) event.getOldParty());
+      if (event.getNewParty() != null && event.getNewParty() instanceof Competitor) {
+        // Player switching teams, check if match needs to end
+        checkEnd();
+      } else if (config.getFilter().query(event.getPlayer()).isAllowed()) {
+        // Player is going to obs and filter allows, eliminate them
+        this.handleElimination(event.getPlayer(), (Competitor) event.getOldParty());
+      }
     }
+  }
+
+  public boolean canJoin(MatchPlayer player, @Nullable JoinRequest request) {
+    if (isPlayerEliminated(player.getId())) return false;
+    if (!match.isRunning() || (request != null && request.has(JoinRequest.Flag.FORCE))) return true;
+
+    return config.getJoinFilter().query(player.getMatch()).isAllowed();
   }
 
   @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
   public void handleJoin(final PlayerParticipationStartEvent event) {
-    if (event.getMatch().isRunning()) {
-      event.cancel(
-          TranslatableComponent.of(
-              "blitz.joinDenied", TranslatableComponent.of("gamemode.blitz.name", TextColor.AQUA)));
-    }
+    if (canJoin(event.getPlayer(), event.getRequest())) return;
+
+    event.cancel(
+        translatable("blitz.joinDenied", text(Gamemode.BLITZ.getFullName(), NamedTextColor.AQUA)));
   }
 
   @EventHandler
   public void handleSpawn(final ParticipantSpawnEvent event) {
-    if (this.config.broadcastLives) {
-      int lives = this.lifeManager.getLives(event.getPlayer().getId());
-      event
-          .getPlayer()
-          .showTitle(
-              TextComponent.empty(),
-              TranslatableComponent.of(
-                  "blitz.livesRemaining",
-                  TextColor.RED,
-                  TranslatableComponent.of(
-                      lives == 1 ? "misc.life" : "misc.lives",
-                      TextColor.AQUA,
-                      TextComponent.of(Integer.toString(lives)))),
-              0,
-              60,
-              20);
+    if (this.config.getBroadcastLives()) {
+      MatchPlayer matchPlayer = event.getPlayer();
+      showLivesTitle(matchPlayer);
     }
+  }
+
+  public void showLivesTitle(MatchPlayer matchPlayer) {
+    int lives = this.lifeManager.getLives(matchPlayer.getId());
+    matchPlayer.showTitle(
+        title(
+            empty(),
+            translatable(
+                "blitz.livesRemaining",
+                NamedTextColor.RED,
+                translatable(
+                    lives == 1 ? "misc.life" : "misc.lives", NamedTextColor.AQUA, text(lives))),
+            Title.Times.times(Duration.ZERO, fromTicks(60), fromTicks(20))));
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onBlitzPlayerEliminated(final BlitzPlayerEliminatedEvent event) {
-    this.eliminatedPlayers.add(event.getPlayer().getBukkit().getUniqueId());
+    this.eliminatedPlayers.add(event.getPlayer().getId());
 
     World world = event.getMatch().getWorld();
     Location death = event.getDeathLocation();
@@ -131,19 +171,27 @@ public class BlitzMatchModule implements MatchModule, Listener {
   }
 
   private void handleElimination(final MatchPlayer player, Competitor competitor) {
-    final BlitzPlayerEliminatedEvent eliminatedEvent =
-        new BlitzPlayerEliminatedEvent(
-            this.match, player, competitor, player.getBukkit().getLocation());
+    if (!eliminatedPlayers.add(player.getBukkit().getUniqueId())) return;
 
-    // wait until the next tick to do this so stat recording and other stuff works
+    match.callEvent(new BlitzPlayerEliminatedEvent(player, competitor, player.getLocation()));
+
+    checkEnd();
+  }
+
+  private void checkEnd() {
+    // Process eliminations within the same tick simultaneously, so that ties are properly detected
+
+    // Player leaving may have ended the match, causing a rejected execution.
+    if (!match.isRunning()) return;
+
     match
         .getExecutor(MatchScope.RUNNING)
         .execute(
             () -> {
-              match.callEvent(eliminatedEvent);
-              if (player.getParty() instanceof Competitor) {
-                match.setParty(player, match.getDefaultParty());
-              }
+              ImmutableSet.copyOf(match.getParticipants()).stream()
+                  .filter(participating -> isPlayerEliminated(participating.getId()))
+                  .forEach(participating -> match.setParty(participating, match.getDefaultParty()));
+
               match.calculateVictory();
             });
   }

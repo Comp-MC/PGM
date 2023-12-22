@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.*;
+import org.bukkit.inventory.Recipe;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffectType;
 
@@ -20,6 +21,28 @@ public interface BukkitUtils {
       PLUGIN.set(Bukkit.getPluginManager().getPlugin("PGM"));
     }
     return PLUGIN.get();
+  }
+
+  Boolean isSportPaper = Platform.SERVER_PLATFORM == Platform.SPORTPAPER_1_8;
+
+  static boolean isSportPaper() {
+    return isSportPaper;
+  }
+
+  static void addRecipe(World world, Recipe recipe) {
+    if (BukkitUtils.isSportPaper()) {
+      world.addRecipe(recipe);
+    } else {
+      Bukkit.addRecipe(recipe);
+    }
+  }
+
+  static void resetRecipes(World world) {
+    if (BukkitUtils.isSportPaper()) {
+      world.resetRecipes();
+    } else {
+      Bukkit.resetRecipes();
+    }
   }
 
   /** Makes strings have pretty colors */
@@ -143,15 +166,11 @@ public interface BukkitUtils {
           .put(PotionEffectType.SLOW, "Slowness")
           .put(PotionEffectType.SLOW_DIGGING, "Mining Fatigue")
           .put(PotionEffectType.SPEED, "Speed")
-          .put(PotionEffectType.WATER_BREATHING, "Water Breating")
+          .put(PotionEffectType.WATER_BREATHING, "Water Breathing")
           .put(PotionEffectType.WEAKNESS, "Weakness")
           .put(PotionEffectType.WITHER, "Wither")
           .put(PotionEffectType.HEALTH_BOOST, "Health Boost")
           .put(PotionEffectType.ABSORPTION, "Absorption")
           .put(PotionEffectType.SATURATION, "Saturation")
           .build();
-
-  static ChatColor convertColor(net.md_5.bungee.api.ChatColor color) {
-    return ChatColor.getByChar(color.toString().charAt(1));
-  }
 }

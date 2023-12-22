@@ -1,12 +1,14 @@
 package tc.oc.pgm.controlpoint;
 
-import net.kyori.text.TextComponent;
-import net.kyori.text.format.TextColor;
+import static net.kyori.adventure.text.Component.text;
+
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.controlpoint.events.ControllerChangeEvent;
+import tc.oc.pgm.goals.ShowOption;
 import tc.oc.pgm.util.text.TextFormatter;
 
 public class ControlPointAnnouncer implements Listener {
@@ -18,24 +20,25 @@ public class ControlPointAnnouncer implements Listener {
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onOwnerChange(ControllerChangeEvent event) {
-    if (event.getControlPoint().isVisible()) {
+    if (event.getControlPoint().hasShowOption(ShowOption.SHOW_MESSAGES)) {
 
       if (event.getOldController() != null && event.getNewController() == null) {
         this.match.sendMessage(
-            TextComponent.builder()
+            text()
                 .append(event.getOldController().getName())
-                .append(" lost ", TextColor.GRAY)
-                .append(event.getControlPoint().getName(), TextColor.WHITE)
+                .append(text(" lost ", NamedTextColor.GRAY))
+                .append(text(event.getControlPoint().getName(), NamedTextColor.WHITE))
                 .build());
 
       } else if (event.getNewController() != null) {
         this.match.sendMessage(
-            TextComponent.builder()
+            text()
                 .append(event.getNewController().getName())
-                .append(" captured ", TextColor.GRAY)
+                .append(text(" captured ", NamedTextColor.GRAY))
                 .append(
-                    event.getControlPoint().getName(),
-                    TextFormatter.convert(event.getNewController().getColor()))
+                    text(
+                        event.getControlPoint().getName(),
+                        TextFormatter.convert(event.getNewController().getColor())))
                 .build());
       }
     }

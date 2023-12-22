@@ -1,10 +1,12 @@
 package tc.oc.pgm.wool;
 
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+
 import java.util.Collections;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TranslatableComponent;
-import org.bukkit.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
 import org.bukkit.block.BlockState;
@@ -12,28 +14,29 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.inventory.ItemStack;
-import tc.oc.pgm.api.event.PlayerItemTransferEvent;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.Party;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.goals.Goal;
-import tc.oc.pgm.goals.ProximityMetric;
 import tc.oc.pgm.goals.TouchableGoal;
 import tc.oc.pgm.kits.ApplyItemKitEvent;
 import tc.oc.pgm.kits.ApplyKitEvent;
 import tc.oc.pgm.kits.ArmorKit;
 import tc.oc.pgm.teams.Team;
 import tc.oc.pgm.util.bukkit.BukkitUtils;
+import tc.oc.pgm.util.event.PlayerItemTransferEvent;
 import tc.oc.pgm.util.named.NameStyle;
+import tc.oc.pgm.util.text.TextFormatter;
 
 public class MonumentWool extends TouchableGoal<MonumentWoolFactory>
     implements Goal<MonumentWoolFactory> {
 
-  public static final String SYMBOL_WOOL_INCOMPLETE = "\u2b1c"; // ⬜
-  public static final String SYMBOL_WOOL_TOUCHED = "\u2592"; // ▒
-  public static final String SYMBOL_WOOL_COMPLETE = "\u2b1b"; // ⬛
+  public static final Component SYMBOL_WOOL_INCOMPLETE = text("\u2b1c"); // ⬜
+  public static final Component SYMBOL_WOOL_TOUCHED = text("\u2592"); // ▒
+  public static final Component SYMBOL_WOOL_COMPLETE = text("\u2b1b"); // ⬛
 
   protected boolean placed = false;
   private final Location woolLocation;
@@ -59,12 +62,16 @@ public class MonumentWool extends TouchableGoal<MonumentWoolFactory>
   // Remove @Nullable
   @Override
   public Team getOwner() {
-    return super.getOwner();
+    Team owner = super.getOwner();
+    if (owner == null) {
+      throw new IllegalStateException("wool " + getId() + " has no owner");
+    }
+    return owner;
   }
 
   @Override
   public Component getTouchMessage(ParticipantState toucher, boolean self) {
-    return TranslatableComponent.of(
+    return translatable(
         self ? "wool.touch.owned.you" : "wool.touch.owned.player",
         toucher.getName(NameStyle.COLOR),
         getComponentName(),
@@ -103,26 +110,13 @@ public class MonumentWool extends TouchableGoal<MonumentWoolFactory>
       ParticipantState participant = this.getMatch().getParticipantState(player);
       if (participant != null && this.canComplete(participant.getParty())) {
         touch(participant);
-
-        // Initialize monument proximity
-        ProximityMetric metric = getProximityMetric(participant.getParty());
-        if (metric != null) {
-          switch (metric.type) {
-            case CLOSEST_BLOCK:
-              updateProximity(participant, this.woolLocation);
-              break;
-            case CLOSEST_PLAYER:
-              updateProximity(participant, player.getLocation());
-              break;
-          }
-        }
       }
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onItemTransfer(PlayerItemTransferEvent event) {
-    if (event.isAcquiring()) handleWoolAcquisition(event.getPlayer(), event.getItemStack());
+    if (event.isAcquiring()) handleWoolAcquisition(event.getPlayer(), event.getItem());
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -174,16 +168,16 @@ public class MonumentWool extends TouchableGoal<MonumentWoolFactory>
   }
 
   @Override
-  public ChatColor renderSidebarStatusColor(@Nullable Competitor competitor, Party viewer) {
+  public TextColor renderSidebarStatusColor(@Nullable Competitor competitor, Party viewer) {
     if (getDyeColor() == DyeColor.BLUE) {
-      return ChatColor.DARK_BLUE; // DARK_BLUE looks ok on sidebar, but not in chat
+      return NamedTextColor.DARK_BLUE; // DARK_BLUE looks ok on sidebar, but not in chat
     } else {
-      return BukkitUtils.dyeColorToChatColor(this.getDyeColor());
+      return TextFormatter.convert(BukkitUtils.dyeColorToChatColor(this.getDyeColor()));
     }
   }
 
   @Override
-  public String renderSidebarStatusText(@Nullable Competitor competitor, Party viewer) {
+  public Component renderSidebarStatusText(@Nullable Competitor competitor, Party viewer) {
     if (this.isCompleted()) {
       return SYMBOL_WOOL_COMPLETE;
     } else if (shouldShowTouched(competitor, viewer)) {

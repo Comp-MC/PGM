@@ -1,29 +1,30 @@
 package tc.oc.pgm.command;
 
-import app.ashcon.intake.Command;
-import app.ashcon.intake.parametric.annotation.Default;
-import app.ashcon.intake.parametric.annotation.Switch;
+import static net.kyori.adventure.text.Component.translatable;
+
+import cloud.commandframework.annotations.Argument;
+import cloud.commandframework.annotations.CommandDescription;
+import cloud.commandframework.annotations.CommandMethod;
+import cloud.commandframework.annotations.CommandPermission;
+import cloud.commandframework.annotations.Flag;
 import java.time.Duration;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
+import net.kyori.adventure.text.format.NamedTextColor;
 import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.restart.RequestRestartEvent;
 import tc.oc.pgm.restart.RestartManager;
-import tc.oc.pgm.util.chat.Audience;
+import tc.oc.pgm.util.Audience;
 
 public final class RestartCommand {
 
-  @Command(
-      aliases = {"restart", "queuerestart", "qr"},
-      desc = "Restart the server",
-      flags = "f",
-      perms = Permissions.STOP)
+  @CommandMethod("restart|queuerestart|qr [duration]")
+  @CommandDescription("Restart the server")
+  @CommandPermission(Permissions.STOP)
   public void restart(
       Audience audience,
       Match match,
-      @Default("30s") Duration duration,
-      @Switch('f') boolean force) {
+      @Argument("duration") Duration duration,
+      @Flag(value = "force", aliases = "f") boolean force) {
     RestartManager.queueRestart("Restart requested via /queuerestart command", duration);
 
     if (force && match.isRunning()) {
@@ -31,11 +32,9 @@ public final class RestartCommand {
     }
 
     if (match.isRunning()) {
-      audience.sendMessage(
-          TranslatableComponent.of("admin.queueRestart.restartQueued", TextColor.RED));
+      audience.sendMessage(translatable("admin.queueRestart.restartQueued", NamedTextColor.RED));
     } else {
-      audience.sendMessage(
-          TranslatableComponent.of("admin.queueRestart.restartingNow", TextColor.GREEN));
+      audience.sendMessage(translatable("admin.queueRestart.restartingNow", NamedTextColor.GREEN));
     }
 
     match.callEvent(new RequestRestartEvent());

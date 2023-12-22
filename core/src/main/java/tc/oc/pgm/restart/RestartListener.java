@@ -3,11 +3,11 @@ package tc.oc.pgm.restart;
 import java.time.Duration;
 import java.util.Iterator;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchManager;
@@ -61,7 +61,7 @@ public class RestartListener implements Listener {
           Duration countdownTime =
               RestartManager.getCountdown() != null
                   ? RestartManager.getCountdown()
-                  : Duration.ofSeconds(30);
+                  : PGM.get().getConfiguration().getRestartTime();
           this.logger.info("Starting restart countdown from " + countdownTime);
           ctx.start(new RestartCountdown(match), countdownTime);
         }

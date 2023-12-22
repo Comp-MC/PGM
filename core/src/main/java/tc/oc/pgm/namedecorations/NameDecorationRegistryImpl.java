@@ -1,15 +1,15 @@
 package tc.oc.pgm.namedecorations;
 
+import static net.kyori.adventure.text.Component.text;
+
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.format.TextColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -17,8 +17,11 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.metadata.MetadataValue;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.event.NameDecorationChangeEvent;
 import tc.oc.pgm.api.party.Party;
@@ -26,8 +29,8 @@ import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.events.PlayerJoinMatchEvent;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
 import tc.oc.pgm.util.named.NameDecorationProvider;
+import tc.oc.pgm.util.player.PlayerComponent;
 import tc.oc.pgm.util.text.TextFormatter;
-import tc.oc.pgm.util.text.types.PlayerComponent;
 
 @SuppressWarnings("UnstableApiUsage")
 public class NameDecorationRegistryImpl implements NameDecorationRegistry, Listener {
@@ -37,11 +40,11 @@ public class NameDecorationRegistryImpl implements NameDecorationRegistry, Liste
   private NameDecorationProvider provider;
   private final LoadingCache<UUID, DecorationCacheEntry> decorationCache =
       CacheBuilder.newBuilder()
-          .expireAfterAccess(1, TimeUnit.HOURS)
+          .expireAfterAccess(15, TimeUnit.MINUTES)
           .build(
               new CacheLoader<UUID, DecorationCacheEntry>() {
                 @Override
-                public DecorationCacheEntry load(@Nonnull UUID uuid) {
+                public DecorationCacheEntry load(@NotNull UUID uuid) {
                   return new DecorationCacheEntry(uuid);
                 }
               });
@@ -69,10 +72,17 @@ public class NameDecorationRegistryImpl implements NameDecorationRegistry, Liste
     player.setDisplayName(getDecoratedName(player, party == null ? null : party.getColor()));
   }
 
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onPlayerQuit(PlayerQuitEvent event) {
+    decorationCache.invalidate(event.getPlayer().getUniqueId());
+    PlayerComponent.RENDERER.decorationChanged(event.getPlayer().getUniqueId());
+  }
+
   @EventHandler
   public void onNameDecorationChange(NameDecorationChangeEvent event) {
     if (event.getUUID() == null) return;
     decorationCache.invalidate(event.getUUID());
+    PlayerComponent.RENDERER.decorationChanged(event.getUUID());
 
     final Player player = Bukkit.getPlayer(event.getUUID());
     final MatchPlayer matchPlayer = PGM.get().getMatchManager().getPlayer(player);
@@ -94,11 +104,12 @@ public class NameDecorationRegistryImpl implements NameDecorationRegistry, Liste
 
   @Override
   public Component getDecoratedNameComponent(Player player, ChatColor partyColor) {
-    return TextComponent.builder()
+    return text()
         .append(getPrefixComponent(player.getUniqueId()))
         .append(
-            player.getName(),
-            partyColor == null ? TextColor.WHITE : TextFormatter.convert(partyColor))
+            text(
+                player.getName(),
+                partyColor == null ? NamedTextColor.WHITE : TextFormatter.convert(partyColor)))
         .append(getSuffixComponent(player.getUniqueId()))
         .build();
   }
@@ -132,7 +143,7 @@ public class NameDecorationRegistryImpl implements NameDecorationRegistry, Liste
   }
 
   @Override
-  @Nonnull
+  @NotNull
   public NameDecorationProvider getProvider() {
     return provider;
   }

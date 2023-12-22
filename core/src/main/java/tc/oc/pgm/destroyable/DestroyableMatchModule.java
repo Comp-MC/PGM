@@ -1,8 +1,8 @@
 package tc.oc.pgm.destroyable;
 
+import static net.kyori.adventure.text.Component.translatable;
+
 import java.util.Collection;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
 import org.bukkit.block.Block;
 import org.bukkit.entity.minecart.ExplosiveMinecart;
 import org.bukkit.event.EventHandler;
@@ -20,6 +20,7 @@ import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.ParticipantBlockTransformEvent;
+import tc.oc.pgm.goals.ShowOption;
 import tc.oc.pgm.modes.ObjectiveModeChangeEvent;
 
 @ListenerScope(MatchScope.RUNNING)
@@ -74,7 +75,7 @@ public class DestroyableMatchModule implements MatchModule, Listener {
               event.getNewState(),
               ParticipantBlockTransformEvent.getPlayerState(event));
       if (reasonKey != null) {
-        event.setCancelled(true, TranslatableComponent.of(reasonKey));
+        event.setCancelled(translatable(reasonKey, destroyable.getComponentName()));
         return;
       }
     }
@@ -114,18 +115,21 @@ public class DestroyableMatchModule implements MatchModule, Listener {
           && destroyable.hasMaterial(material)) {
 
         event.setCancelled(true);
-        // TODO: translate this
-        player.sendWarning(TextComponent.of("You may not damage your own objective."));
+        player.sendWarning(translatable("objective.damageOwn", destroyable.getComponentName()));
       }
     }
   }
 
-  @EventHandler(priority = EventPriority.MONITOR)
+  @EventHandler(priority = EventPriority.HIGHEST)
   public void onObjectiveModeSwitch(final ObjectiveModeChangeEvent event) {
     for (Destroyable destroyable : this.destroyables) {
-      if (destroyable.isAffectedByModeChanges()) {
+      if (destroyable.getModes() == null || destroyable.getModes().contains(event.getMode())) {
         double oldCompletion = destroyable.getCompletion();
         destroyable.replaceBlocks(event.getMode().getMaterialData());
+        // if at least one of the destroyables are visible, the mode change message will be sent
+        if (destroyable.hasShowOption(ShowOption.SHOW_MESSAGES)) {
+          event.setVisible(true);
+        }
         if (oldCompletion != destroyable.getCompletion()) {
           // Multi-stage destroyables can have their total completion changed by this
           this.match.callEvent(new DestroyableHealthChangeEvent(this.match, destroyable, null));

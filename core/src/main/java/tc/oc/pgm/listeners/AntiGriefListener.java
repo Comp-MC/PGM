@@ -1,11 +1,19 @@
 package tc.oc.pgm.listeners;
 
+import static net.kyori.adventure.key.Key.key;
+import static net.kyori.adventure.sound.Sound.sound;
+import static net.kyori.adventure.text.Component.translatable;
+import static tc.oc.pgm.util.player.PlayerComponent.player;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
-import org.bukkit.*;
+import net.kyori.adventure.sound.Sound;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.ChatColor;
+import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -15,7 +23,6 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.event.player.PlayerAttackEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
@@ -27,8 +34,9 @@ import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.spawns.events.ObserverKitApplyEvent;
 import tc.oc.pgm.tnt.TNTMatchModule;
 import tc.oc.pgm.tracker.Trackers;
+import tc.oc.pgm.util.event.player.PlayerAttackEntityEvent;
 import tc.oc.pgm.util.named.NameStyle;
-import tc.oc.pgm.util.text.MinecraftTranslations;
+import tc.oc.pgm.util.text.MinecraftComponent;
 import tc.oc.pgm.util.text.TextFormatter;
 import tc.oc.pgm.util.text.TextTranslations;
 
@@ -36,6 +44,8 @@ public class AntiGriefListener implements Listener {
 
   private static final Material DEFUSE_ITEM = Material.SHEARS;
   private static final int DEFUSE_SLOT = 4;
+
+  private static final Sound DEFUSE_SOUND = sound(key("random.fizz"), Sound.Source.MASTER, 1, 1);
 
   private final MatchManager mm;
 
@@ -70,9 +80,7 @@ public class AntiGriefListener implements Listener {
     Block block = entity.getLocation().getBlock();
     if (block != null
         && (block.getType() == Material.WATER || block.getType() == Material.STATIONARY_WATER)) {
-      clicker.sendMessage(
-          ChatColor.RED
-              + TextTranslations.translate("moderation.defuse.water", clicker.getBukkit()));
+      clicker.sendMessage(translatable("moderation.defuse.water", NamedTextColor.RED));
       return;
     }
 
@@ -86,43 +94,40 @@ public class AntiGriefListener implements Listener {
         this.notifyDefuse(
             clicker,
             entity,
-            ChatColor.RED
-                + TextTranslations.translate(
-                    "moderation.defuse.player",
-                    clicker.getBukkit(),
-                    owner.getBukkit().getDisplayName(clicker.getBukkit()) + ChatColor.RED));
+            translatable("moderation.defuse.player", NamedTextColor.RED, owner.getName()));
 
         ChatDispatcher.broadcastAdminChatMessage(
-            TranslatableComponent.of(
+            translatable(
                 "moderation.defuse.alert.player",
-                TextColor.GRAY,
-                clicker.getName(NameStyle.FANCY),
-                owner.getName(NameStyle.FANCY),
-                MinecraftTranslations.getEntity(entity.getType()).color(TextColor.DARK_RED)),
+                NamedTextColor.GRAY,
+                clicker.getName(),
+                owner.getName(),
+                MinecraftComponent.entity(entity.getType()).color(NamedTextColor.DARK_RED)),
             clicker.getMatch());
       } else {
         this.notifyDefuse(
-            clicker,
-            entity,
-            ChatColor.RED
-                + TextTranslations.translate("moderation.defuse.world", clicker.getBukkit()));
+            clicker, entity, translatable("moderation.defuse.world", NamedTextColor.RED));
 
         ChatDispatcher.broadcastAdminChatMessage(
-            TranslatableComponent.of(
+            translatable(
                 "moderation.defuse.alert.world",
-                TextColor.GRAY,
-                clicker.getName(NameStyle.FANCY),
-                MinecraftTranslations.getEntity(entity.getType()).color(TextColor.DARK_RED)),
+                NamedTextColor.GRAY,
+                clicker.getName(),
+                MinecraftComponent.entity(entity.getType()).color(NamedTextColor.DARK_RED)),
             clicker.getMatch());
       }
     }
   }
 
-  private void notifyDefuse(MatchPlayer clicker, Entity entity, String message) {
+  private void notifyDefuse(MatchPlayer clicker, Entity entity, Component message) {
     clicker.sendMessage(message);
-    for (Player viewer : Bukkit.getOnlinePlayers()) {
-      viewer.playSound(entity.getLocation(), Sound.FIZZ, 1, 1);
-    }
+    clicker
+        .getMatch()
+        .playSound(
+            DEFUSE_SOUND,
+            entity.getLocation().getX(),
+            entity.getLocation().getY(),
+            entity.getLocation().getZ());
   }
 
   @EventHandler(priority = EventPriority.HIGHEST)
@@ -146,9 +151,9 @@ public class AntiGriefListener implements Listener {
     List<ParticipantState> owners = this.removeTnt(loc, 5.0);
     if (owners != null && !owners.isEmpty()) {
       player.sendMessage(
-          TranslatableComponent.of(
+          translatable(
               "moderation.defuse.player",
-              TextFormatter.nameList(owners, NameStyle.COLOR, TextColor.WHITE)));
+              TextFormatter.nameList(owners, NameStyle.COLOR, NamedTextColor.WHITE)));
     }
   }
 

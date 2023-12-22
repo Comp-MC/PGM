@@ -1,43 +1,53 @@
 package tc.oc.pgm.command;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static net.kyori.adventure.text.Component.empty;
+import static net.kyori.adventure.text.Component.space;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+import static net.kyori.adventure.text.event.ClickEvent.openUrl;
+import static net.kyori.adventure.text.event.ClickEvent.runCommand;
+import static net.kyori.adventure.text.event.HoverEvent.showText;
+import static tc.oc.pgm.command.util.ParserConstants.CURRENT;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 
-import app.ashcon.intake.Command;
-import app.ashcon.intake.CommandException;
-import app.ashcon.intake.bukkit.parametric.Type;
-import app.ashcon.intake.bukkit.parametric.annotation.Fallback;
-import app.ashcon.intake.parametric.annotation.Default;
-import app.ashcon.intake.parametric.annotation.Switch;
-import app.ashcon.intake.parametric.annotation.Text;
-import com.google.common.collect.ImmutableSortedSet;
-import com.google.common.collect.Sets;
+import cloud.commandframework.annotations.Argument;
+import cloud.commandframework.annotations.CommandDescription;
+import cloud.commandframework.annotations.CommandMethod;
+import cloud.commandframework.annotations.Flag;
+import cloud.commandframework.annotations.specifier.Greedy;
+import cloud.commandframework.annotations.specifier.Range;
+import cloud.commandframework.annotations.suggestions.Suggestions;
+import cloud.commandframework.context.CommandContext;
+import com.google.common.collect.ImmutableList;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TextComponent.Builder;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.event.ClickEvent;
-import net.kyori.text.event.HoverEvent;
-import net.kyori.text.format.TextColor;
-import net.kyori.text.format.TextDecoration;
-import net.md_5.bungee.api.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.ComponentLike;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.TextComponent.Builder;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.command.CommandSender;
+import org.jetbrains.annotations.NotNull;
+import org.yaml.snakeyaml.util.UriEncoder;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.map.Contributor;
 import tc.oc.pgm.api.map.MapInfo;
 import tc.oc.pgm.api.map.MapLibrary;
+import tc.oc.pgm.api.map.MapSource;
 import tc.oc.pgm.api.map.MapTag;
-import tc.oc.pgm.rotation.MapPool;
+import tc.oc.pgm.api.map.Phase;
+import tc.oc.pgm.map.source.MapRoot;
 import tc.oc.pgm.rotation.MapPoolManager;
-import tc.oc.pgm.util.LegacyFormatUtils;
+import tc.oc.pgm.rotation.pools.MapPool;
+import tc.oc.pgm.util.Audience;
+import tc.oc.pgm.util.LiquidMetal;
 import tc.oc.pgm.util.PrettyPaginatedComponentResults;
-import tc.oc.pgm.util.chat.Audience;
 import tc.oc.pgm.util.named.MapNameStyle;
 import tc.oc.pgm.util.named.NameStyle;
 import tc.oc.pgm.util.text.TextFormatter;
@@ -45,22 +55,23 @@ import tc.oc.pgm.util.text.TextTranslations;
 
 public final class MapCommand {
 
-  @Command(
-      aliases = {"maps", "maplist", "ml"},
-      desc = "List all maps loaded",
-      usage = "[-a <author>] [-t <tag1>,<tag2>]")
+  @CommandMethod("maps|maplist|ml [page]")
+  @CommandDescription("List all maps loaded")
   public void maps(
       Audience audience,
       CommandSender sender,
       MapLibrary library,
-      @Default("1") Integer page,
-      @Fallback(Type.NULL) @Switch('t') String tags,
-      @Fallback(Type.NULL) @Switch('a') String author)
-      throws CommandException {
-    Stream<MapInfo> search = Sets.newHashSet(library.getMaps()).stream();
-    if (tags != null) {
+      @Argument(value = "page", defaultValue = "1") @Range(min = "1") int page,
+      @Flag(value = "tags", aliases = "t", repeatable = true, suggestions = "maptags")
+          List<String> tags,
+      @Flag(value = "author", aliases = "a") String author,
+      @Flag(value = "name", aliases = "n") String name,
+      @Flag(value = "phase", aliases = "p") Phase phase) {
+    Stream<MapInfo> search = library.getMaps(name);
+    if (!tags.isEmpty()) {
       final Map<Boolean, Set<String>> tagSet =
-          Stream.of(tags.split(","))
+          tags.stream()
+              .flatMap(t -> Arrays.stream(t.split(",")))
               .map(String::toLowerCase)
               .map(String::trim)
               .collect(
@@ -72,8 +83,19 @@ public final class MapCommand {
       search = search.filter(map -> matchesTags(map, tagSet.get(false), tagSet.get(true)));
     }
 
+    // FIXME: change when cloud gets support for default flag values
+    final Phase finalPhase = phase == null ? Phase.PRODUCTION : phase;
+    search = search.filter(map -> map.getPhase() == finalPhase);
+
     if (author != null) {
-      search = search.filter(map -> matchesAuthor(map, author));
+      String query = author;
+
+      List<MapInfo> collect = search.collect(Collectors.toList());
+      boolean exactMatch =
+          collect.stream().anyMatch((suggestion) -> matchesAuthor(suggestion, query, true));
+      search =
+          collect.stream()
+              .filter((mapSuggestion -> matchesAuthor(mapSuggestion, query, exactMatch)));
     }
 
     Set<MapInfo> maps = search.collect(Collectors.toCollection(TreeSet::new));
@@ -82,38 +104,52 @@ public final class MapCommand {
 
     Component title =
         TextFormatter.paginate(
-            TranslatableComponent.of("map.title"),
+            translatable("map.title"),
             page,
             pages,
-            TextColor.DARK_AQUA,
-            TextColor.AQUA,
+            NamedTextColor.DARK_AQUA,
+            NamedTextColor.AQUA,
             true);
-    Component listHeader = TextFormatter.horizontalLineHeading(sender, title, TextColor.BLUE);
+    Component listHeader = TextFormatter.horizontalLineHeading(sender, title, NamedTextColor.BLUE);
 
     new PrettyPaginatedComponentResults<MapInfo>(listHeader, resultsPerPage) {
       @Override
       public Component format(MapInfo map, int index) {
-        return TextComponent.builder()
-            .append(Integer.toString(index + 1))
-            .append(". ")
+        return text()
+            .append(text(index + 1))
+            .append(text(". "))
             .append(
                 map.getStyledName(MapNameStyle.COLOR_WITH_AUTHORS)
                     .hoverEvent(
-                        HoverEvent.showText(
-                            TranslatableComponent.of(
+                        showText(
+                            translatable(
                                 "command.maps.hover",
-                                TextColor.GRAY,
+                                NamedTextColor.GRAY,
                                 map.getStyledName(MapNameStyle.COLOR))))
-                    .clickEvent(ClickEvent.runCommand("/map " + map.getName())))
+                    .clickEvent(runCommand("/map " + map.getName())))
             .build();
       }
-    }.display(audience, ImmutableSortedSet.copyOf(maps), page);
+    }.display(audience, ImmutableList.copyOf(maps), page);
+  }
+
+  @Suggestions("maptags")
+  public List<String> suggestMapTags(CommandContext<CommandSender> sender, String input) {
+    int commaIdx = input.lastIndexOf(',');
+
+    final String prefix = input.substring(0, commaIdx == -1 ? 0 : commaIdx + 1);
+    final String toComplete =
+        input.substring(commaIdx + 1).toLowerCase(Locale.ROOT).replace("!", "");
+
+    return MapTag.getAllTagIds().stream()
+        .filter(mt -> LiquidMetal.match(mt, toComplete))
+        .flatMap(tag -> Stream.of(prefix + tag, prefix + "!" + tag))
+        .collect(Collectors.toList());
   }
 
   private static boolean matchesTags(
-      MapInfo map, @Nullable Collection<String> posTags, @Nullable Collection<String> negTags) {
+      MapInfo map, Collection<String> posTags, Collection<String> negTags) {
     int matches = 0;
-    for (MapTag tag : checkNotNull(map).getTags()) {
+    for (MapTag tag : assertNotNull(map).getTags()) {
       if (negTags != null && negTags.contains(tag.getId())) {
         return false;
       }
@@ -124,42 +160,41 @@ public final class MapCommand {
     return posTags == null || matches == posTags.size();
   }
 
-  private static boolean matchesAuthor(MapInfo map, String query) {
-    checkNotNull(map);
-    query = checkNotNull(query).toLowerCase();
-
+  private static boolean matchesAuthor(MapInfo map, String query, boolean exact) {
+    String lowerCaseQuery = query.toLowerCase(Locale.ROOT);
     for (Contributor contributor : map.getAuthors()) {
-      if (contributor.getNameLegacy().toLowerCase().contains(query)) {
+      String name = contributor.getNameLegacy();
+      if ((exact && lowerCaseQuery.equalsIgnoreCase(name))
+          || (!exact && name != null && name.toLowerCase(Locale.ROOT).contains(lowerCaseQuery))) {
         return true;
       }
     }
     return false;
   }
 
-  @Command(
-      aliases = {"map", "mapinfo"},
-      desc = "Show info about a map",
-      usage = "[map name] - defaults to the current map")
-  public void map(Audience audience, CommandSender sender, @Text MapInfo map) {
+  @CommandMethod("map|mapinfo [map]")
+  @CommandDescription("Show info about a map")
+  public void map(
+      Audience audience,
+      CommandSender sender,
+      @Argument(value = "map", defaultValue = CURRENT) @Greedy MapInfo map) {
     audience.sendMessage(
-        LegacyFormatUtils.horizontalLineHeading(
-            ChatColor.DARK_AQUA
-                + map.getName()
-                + " "
-                + ChatColor.GRAY
-                + map.getVersion().toString(),
-            ChatColor.RED));
+        TextFormatter.horizontalLineHeading(
+            sender,
+            text(map.getName() + " ", NamedTextColor.DARK_AQUA)
+                .append(text(map.getVersion().toString(), NamedTextColor.GRAY)),
+            NamedTextColor.RED));
 
     audience.sendMessage(
-        TextComponent.builder()
+        text()
             .append(mapInfoLabel("map.info.objective"))
-            .append(map.getDescription(), TextColor.GOLD)
+            .append(text(map.getDescription(), NamedTextColor.GOLD))
             .build());
 
     Collection<Contributor> authors = map.getAuthors();
     if (authors.size() == 1) {
       audience.sendMessage(
-          TextComponent.builder()
+          text()
               .append(mapInfoLabel("map.info.author.singular"))
               .append(formatContribution(authors.iterator().next()))
               .build());
@@ -167,7 +202,7 @@ public final class MapCommand {
       audience.sendMessage(mapInfoLabel("map.info.author.plural"));
       for (Contributor author : authors) {
         audience.sendMessage(
-            TextComponent.builder().append("  ").append(formatContribution(author)).build());
+            text().append(space()).append(space()).append(formatContribution(author)).build());
       }
     }
 
@@ -176,7 +211,7 @@ public final class MapCommand {
       audience.sendMessage(mapInfoLabel("map.info.contributors"));
       for (Contributor contributor : contributors) {
         audience.sendMessage(
-            TextComponent.builder().append("  ").append(formatContribution(contributor)).build());
+            text().append(space()).append(space()).append(formatContribution(contributor)).build());
       }
     }
 
@@ -186,9 +221,9 @@ public final class MapCommand {
       String date = created.format(formatter);
 
       audience.sendMessage(
-          TextComponent.builder()
+          text()
               .append(mapInfoLabel("map.info.created"))
-              .append(date, TextColor.GOLD)
+              .append(text(date, NamedTextColor.GOLD))
               .build());
     }
 
@@ -198,24 +233,30 @@ public final class MapCommand {
       int i = 0;
       for (String rule : map.getRules()) {
         audience.sendMessage(
-            TextComponent.builder()
-                .append(++i + ") ", TextColor.WHITE)
-                .append(rule, TextColor.GOLD)
+            text()
+                .append(text(++i + ") ", NamedTextColor.WHITE))
+                .append(text(rule, NamedTextColor.GOLD))
                 .build());
       }
     }
 
     audience.sendMessage(
-        TextComponent.builder()
+        text()
             .append(mapInfoLabel("map.info.playerLimit"))
             .append(createPlayerLimitComponent(sender, map))
             .build());
 
     if (sender.hasPermission(Permissions.DEBUG)) {
       audience.sendMessage(
-          TextComponent.builder()
+          text()
               .append(mapInfoLabel("map.info.proto"))
-              .append(map.getProto().toString(), TextColor.GOLD)
+              .append(text(map.getProto().toString(), NamedTextColor.GOLD))
+              .build());
+
+      audience.sendMessage(
+          text()
+              .append(mapInfoLabel("map.info.phase"))
+              .append(map.getPhase().toComponent().color(NamedTextColor.GOLD))
               .build());
     }
 
@@ -224,93 +265,188 @@ public final class MapCommand {
     if (PGM.get().getMapOrder() instanceof MapPoolManager) {
       String mapPools =
           ((MapPoolManager) PGM.get().getMapOrder())
-              .getMapPools().stream()
-                  .filter(pool -> pool.getMaps().contains(map))
-                  .map(MapPool::getName)
-                  .collect(Collectors.joining(", "));
+              .getMapPoolStream()
+              .filter(pool -> pool.getMaps().contains(map))
+              .map(MapPool::getName)
+              .collect(Collectors.joining(" "));
       if (!mapPools.isEmpty()) {
         audience.sendMessage(
-            TextComponent.builder()
+            text()
                 .append(mapInfoLabel("map.info.pools"))
-                .append(TextComponent.of(mapPools))
-                .colorIfAbsent(TextColor.GOLD)
-                .decoration(TextDecoration.BOLD, false)
+                .append(text(mapPools, NamedTextColor.GOLD))
                 .build());
       }
+    }
+
+    if (map.getVariants().size() > 1) {
+      audience.sendMessage(formatVariants(map));
+    }
+
+    if (!map.getSource().getRoot().isPrivate() || sender.hasPermission(Permissions.DEBUG)) {
+      audience.sendMessage(formatMapSource(sender, map));
     }
   }
 
   private Component createTagsComponent(Collection<MapTag> tags) {
-    checkNotNull(tags);
+    assertNotNull(tags);
 
-    Builder result = TextComponent.builder().append(mapInfoLabel("map.info.tags"));
+    Builder result = text().append(mapInfoLabel("map.info.tags"));
     MapTag[] mapTags = tags.toArray(new MapTag[0]);
     for (int i = 0; i < mapTags.length; i++) {
       if (i != 0) {
-        result.append(TextComponent.space());
+        result.append(space());
       }
 
       String mapTag = mapTags[i].getId();
 
       Component tag =
-          TextComponent.builder()
-              .append("#")
-              .append(mapTag)
-              .clickEvent(ClickEvent.runCommand("/maps -t " + mapTag))
+          text()
+              .append(text("#"))
+              .append(text(mapTag))
+              .clickEvent(runCommand("/maps -t " + mapTag))
               .hoverEvent(
-                  HoverEvent.showText(
-                      TranslatableComponent.of(
+                  showText(
+                      translatable(
                           "map.info.mapTag.hover",
-                          TextColor.GRAY,
-                          TextComponent.of(mapTag, TextColor.GOLD))))
+                          NamedTextColor.GRAY,
+                          text(mapTag, NamedTextColor.GOLD))))
+              .color(NamedTextColor.GOLD)
               .build();
 
       result.append(tag);
     }
-    return result.color(TextColor.GOLD).build();
+    return result.build();
   }
 
   private static Component createPlayerLimitComponent(CommandSender sender, MapInfo map) {
-    checkNotNull(sender);
-    checkNotNull(map);
+    assertNotNull(sender);
+    assertNotNull(map);
 
     Collection<Integer> maxPlayers = map.getMaxPlayers();
     if (maxPlayers.isEmpty()) {
-      return TextComponent.empty();
+      return empty();
     } else if (maxPlayers.size() == 1) {
-      return TextComponent.of(maxPlayers.iterator().next().toString(), TextColor.GOLD);
+      return text(maxPlayers.iterator().next().toString(), NamedTextColor.GOLD);
     }
 
     int totalPlayers = maxPlayers.stream().mapToInt(i -> i).sum();
-    Component total = TextComponent.of(Integer.toString(totalPlayers), TextColor.GOLD);
+    Component total = text(totalPlayers, NamedTextColor.GOLD);
 
     String verboseVs = " " + TextTranslations.translate("map.info.playerLimit.vs", sender) + " ";
     Component verbose =
-        TextComponent.builder()
-            .append("(")
+        text()
+            .append(text("("))
             .append(
-                maxPlayers.stream().map(Object::toString).collect(Collectors.joining(verboseVs)))
-            .append(")")
-            .color(TextColor.GRAY)
+                text(
+                    maxPlayers.stream()
+                        .map(Object::toString)
+                        .collect(Collectors.joining(verboseVs))))
+            .append(text(")"))
+            .color(NamedTextColor.GRAY)
             .build();
 
-    return total.append(TextComponent.space()).append(verbose);
+    return total.append(space()).append(verbose);
   }
 
-  private @Nullable Component formatContribution(Contributor contributor) {
+  private Component formatContribution(Contributor contributor) {
     Component componentName = contributor.getName(NameStyle.FANCY);
     if (contributor.getContribution() == null) return componentName;
-    return TextComponent.builder()
+    return text()
         .append(componentName)
-        .append(" - ", TextColor.GRAY)
-        .append(contributor.getContribution(), TextColor.GRAY, TextDecoration.ITALIC)
+        .append(text(" - ", NamedTextColor.GRAY))
+        .append(text(contributor.getContribution(), NamedTextColor.GRAY, TextDecoration.ITALIC))
         .build();
   }
 
   private Component mapInfoLabel(String key) {
-    return TextComponent.builder()
-        .append(TranslatableComponent.of(key, TextColor.DARK_PURPLE, TextDecoration.BOLD))
-        .append(": ")
+    return text()
+        .append(translatable(key, NamedTextColor.DARK_PURPLE, TextDecoration.BOLD))
+        .append(text(": ", NamedTextColor.WHITE))
         .build();
+  }
+
+  private ComponentLike formatVariants(MapInfo map) {
+    TextComponent.Builder text =
+        text().append(mapInfoLabel("map.info.variants")).color(NamedTextColor.GOLD);
+
+    for (MapInfo.VariantInfo variant : map.getVariants().values()) {
+      TextComponent variantComp;
+      if (map.getVariantId().equals(variant.getVariantId())) {
+        variantComp =
+            text(variant.getVariantId(), null, TextDecoration.UNDERLINED)
+                .hoverEvent(
+                    showText(translatable("map.info.variants.current", NamedTextColor.GRAY)));
+      } else {
+        variantComp =
+            text(variant.getVariantId())
+                .hoverEvent(
+                    showText(
+                        translatable(
+                            "command.maps.hover",
+                            NamedTextColor.GRAY,
+                            text(variant.getMapName(), NamedTextColor.GOLD))))
+                .clickEvent(runCommand("/map " + variant.getMapName()));
+      }
+      text.append(variantComp).append(text(" "));
+    }
+    return text;
+  }
+
+  @NotNull
+  private ComponentLike formatMapSource(CommandSender sender, MapInfo map) {
+    MapSource source = map.getSource();
+    MapRoot root = source.getRoot();
+
+    Builder xmlText =
+        text()
+            .append(mapInfoLabel("map.info.xml"))
+            .append(getRepository(root))
+            .append(space())
+            .append(
+                text("/" + source.getRelativeDir().toString(), NamedTextColor.GOLD)
+                    .hoverEvent(showText(translatable("map.info.xml.path", NamedTextColor.GOLD))));
+
+    if (root.getBaseUrl() != null && root.getRemoteHost() != null) {
+      String mapPath = root.getBaseUrl() + UriEncoder.encode(source.getRelativeXml().toString());
+      xmlText.append(
+          text()
+              .color(NamedTextColor.GREEN)
+              .decorate(TextDecoration.BOLD)
+              .append(text(" ["))
+              .append(translatable("map.info.xml.view"))
+              .append(text("]"))
+              .clickEvent(openUrl(mapPath))
+              .hoverEvent(showText(translatable("map.info.xml.tip", NamedTextColor.GREEN))));
+    }
+
+    if (ShowXmlCommand.isEnabledFor(sender)) {
+      xmlText.append(
+          text()
+              .color(NamedTextColor.AQUA)
+              .decorate(TextDecoration.BOLD)
+              .append(text(" ["))
+              .append(translatable("map.info.xml.edit"))
+              .append(text("]"))
+              .clickEvent(runCommand("/showxml " + map.getId()))
+              .hoverEvent(showText(translatable("map.info.xml.edit.tip", NamedTextColor.AQUA))));
+    }
+    return xmlText;
+  }
+
+  private ComponentLike getRepository(MapRoot root) {
+    String repoUrl =
+        root.getRemoteHost() != null ? root.getRemoteHost() + "/" + root.getDisplayName() : null;
+
+    Component hover =
+        repoUrl == null
+            ? translatable("map.info.xml.repository.local", NamedTextColor.YELLOW)
+            : translatable(
+                "map.info.xml.repository.remote",
+                NamedTextColor.YELLOW,
+                text(repoUrl, NamedTextColor.GREEN));
+
+    return text(root.getDisplayName(), NamedTextColor.YELLOW)
+        .hoverEvent(showText(hover))
+        .clickEvent(root.getBaseUrl() == null ? null : openUrl(root.getBaseUrl()));
   }
 }

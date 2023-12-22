@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
@@ -13,7 +12,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
-import org.bukkit.event.player.PlayerOnGroundEvent;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.event.PlayerSpleefEvent;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchScope;
@@ -29,6 +28,7 @@ import tc.oc.pgm.tracker.info.FallState;
 import tc.oc.pgm.tracker.info.GenericFallInfo;
 import tc.oc.pgm.util.ClassLogger;
 import tc.oc.pgm.util.TimeUtils;
+import tc.oc.pgm.util.event.player.PlayerOnGroundEvent;
 import tc.oc.pgm.util.material.Materials;
 
 /** Tracks the state of falls caused by other players and resolves the damage caused by them. */
@@ -63,7 +63,8 @@ public class FallTracker implements Listener, DamageResolver {
           break;
 
         case FIRE_TICK:
-          if (fall.isInLava) {
+          if (fall.isInLava
+              || match.getTick().tick - fall.outLavaTick < FallState.MAX_BURNING_TICKS) {
             fall.to = FallInfo.To.LAVA;
           } else {
             return null;
@@ -169,9 +170,10 @@ public class FallTracker implements Listener, DamageResolver {
     MatchPlayer victim = match.getParticipant(event.getEntity());
     if (victim == null) return;
 
-    if (this.falls.containsKey(victim)) {
-      // A new fall can't be initiated if the victim is already falling
-      return;
+    FallState previousFall = this.falls.get(victim);
+    if (previousFall != null) {
+      if (previousFall.isOngoing(match.getTick())) return;
+      else endFall(previousFall);
     }
 
     Location loc = victim.getBukkit().getLocation();
@@ -255,12 +257,11 @@ public class FallTracker implements Listener, DamageResolver {
       }
 
       if (isInLava != fall.isInLava) {
-        if ((fall.isInLava = isInLava)) {
+        if (!(fall.isInLava = isInLava)) {
           fall.inLavaTick = now.tick;
         } else {
-          // Because players continue to "fall" as long as they are in lava, moving out of lava
-          // can immediately finish their fall
-          this.checkFallTimeout(fall);
+          fall.outLavaTick = now.tick;
+          this.scheduleCheckFallTimeout(fall, FallState.MAX_BURNING_TICKS + 1);
         }
       }
     }

@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -18,41 +17,31 @@ import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
-import tc.oc.pgm.filters.BlockFilter;
 import tc.oc.pgm.kits.ArmorType;
-import tc.oc.pgm.kits.KitMatchModule;
+import tc.oc.pgm.util.material.MaterialMatcher;
 
 @ListenerScope(MatchScope.RUNNING)
 public class ItemKeepMatchModule implements MatchModule, Listener {
 
   private final Match match;
-  private final Set<BlockFilter> itemsToKeep;
-  private final Set<BlockFilter> armorToKeep;
-  private HashMap<MatchPlayer, Map<Integer, ItemStack>> keptInv = Maps.newHashMap();
-  private HashMap<MatchPlayer, Map<ArmorType, ItemStack>> keptArmor = Maps.newHashMap();
+  private final MaterialMatcher itemsToKeep;
+  private final MaterialMatcher armorToKeep;
+  private final Map<MatchPlayer, Map<Integer, ItemStack>> keptInv = Maps.newHashMap();
+  private final Map<MatchPlayer, Map<ArmorType, ItemStack>> keptArmor = Maps.newHashMap();
 
   public ItemKeepMatchModule(
-      Match match, Set<BlockFilter> itemsToKeep, Set<BlockFilter> armorToKeep) {
+      Match match, MaterialMatcher itemsToKeep, MaterialMatcher armorToKeep) {
     this.match = match;
     this.itemsToKeep = itemsToKeep;
     this.armorToKeep = armorToKeep;
   }
 
   private boolean canKeepItem(ItemStack stack) {
-    for (BlockFilter filter : this.itemsToKeep) {
-      if (filter.matches(stack.getData())) return true;
-    }
-    return false;
+    return itemsToKeep.matches(stack);
   }
 
   private boolean canKeepArmor(ItemStack stack) {
-    for (BlockFilter filter : this.itemsToKeep) {
-      if (filter.matches(stack.getData())) return true;
-    }
-    for (BlockFilter filter : this.armorToKeep) {
-      if (filter.matches(stack.getData())) return true;
-    }
-    return false;
+    return itemsToKeep.matches(stack) || armorToKeep.matches(stack);
   }
 
   /**
@@ -81,7 +70,6 @@ public class ItemKeepMatchModule implements MatchModule, Listener {
       this.keptInv.put(player, keptItems);
     }
 
-    KitMatchModule kitMatchModule = this.match.getModule(KitMatchModule.class);
     ItemStack[] wearing = event.getEntity().getInventory().getArmorContents();
     Map<ArmorType, ItemStack> keptArmor = new HashMap<>();
     for (int slot = 0; slot < wearing.length; slot++) {
@@ -90,12 +78,6 @@ public class ItemKeepMatchModule implements MatchModule, Listener {
         if (this.canKeepArmor(stack)) {
           event.getDrops().remove(stack);
           keptArmor.put(ArmorType.byArmorSlot(slot), stack);
-        } else if (kitMatchModule != null
-            && !"true".equalsIgnoreCase(this.match.getWorld().getGameRuleValue("keepInventory"))) {
-          // TODO: When we have an improved player drops module, the drops will
-          // be available on the PGMPlayerDeathEvent. KitMatchModule can listen
-          // for that and deal with the locked armor itself.
-          kitMatchModule.lockArmorSlot(player, ArmorType.byArmorSlot(slot), false);
         }
       }
     }

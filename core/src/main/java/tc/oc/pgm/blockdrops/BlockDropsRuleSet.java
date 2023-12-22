@@ -1,26 +1,33 @@
 package tc.oc.pgm.blockdrops;
 
 import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.annotation.Nullable;
-import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.MaterialData;
-import tc.oc.pgm.api.event.BlockPunchEvent;
-import tc.oc.pgm.api.event.BlockTrampleEvent;
+import org.bukkit.util.BlockVector;
+import org.jetbrains.annotations.Nullable;
+import tc.oc.pgm.api.event.BlockTransformEvent;
 import tc.oc.pgm.api.filter.Filter;
 import tc.oc.pgm.api.filter.query.Query;
 import tc.oc.pgm.api.player.ParticipantState;
+import tc.oc.pgm.filters.matcher.StaticFilter;
 import tc.oc.pgm.filters.query.MaterialQuery;
 import tc.oc.pgm.filters.query.Queries;
+import tc.oc.pgm.kits.Kit;
+import tc.oc.pgm.kits.KitNode;
 import tc.oc.pgm.regions.FiniteBlockRegion;
 import tc.oc.pgm.util.block.BlockStates;
+import tc.oc.pgm.util.event.PlayerPunchBlockEvent;
+import tc.oc.pgm.util.event.PlayerTrampleBlockEvent;
 import tc.oc.pgm.util.nms.NMSHacks;
 
 public class BlockDropsRuleSet {
@@ -42,7 +49,7 @@ public class BlockDropsRuleSet {
   public BlockDropsRuleSet subsetAffecting(FiniteBlockRegion region) {
     ImmutableList.Builder<BlockDropsRule> subset = ImmutableList.builder();
     for (BlockDropsRule rule : this.rules) {
-      for (Block block : region.getBlocks()) {
+      for (BlockVector block : region.getBlockVectors()) {
         if (rule.region == null || rule.region.contains(block)) {
           subset.add(rule);
           break;
@@ -83,6 +90,7 @@ public class BlockDropsRuleSet {
       MaterialData material,
       @Nullable ParticipantState playerState) {
     Map<ItemStack, Double> items = new LinkedHashMap<>();
+    List<Kit> kits = new ArrayList<>();
     MaterialData replacement = null;
     Float fallChance = null;
     Float landChance = null;
@@ -91,18 +99,21 @@ public class BlockDropsRuleSet {
     boolean custom = false;
     block = BlockStates.cloneWithMaterial(block.getBlock(), material);
 
-    boolean rightToolUsed;
-    if (event instanceof BlockBreakEvent) {
+    boolean rightToolUsed = true;
+    if (event instanceof BlockTransformEvent) {
+      BlockTransformEvent blockTransformEvent = (BlockTransformEvent) event;
+      Entity actor = blockTransformEvent.getActor();
+      if (actor instanceof Player) {
+        rightToolUsed = NMSHacks.canMineBlock(material, ((Player) actor).getItemInHand());
+      }
+    } else if (event instanceof BlockBreakEvent) {
       rightToolUsed =
           NMSHacks.canMineBlock(material, ((BlockBreakEvent) event).getPlayer().getItemInHand());
-      ;
-    } else {
-      rightToolUsed = true;
     }
 
     for (BlockDropsRule rule : this.rules) {
-      if (event instanceof BlockPunchEvent && !rule.punch) continue;
-      if (event instanceof BlockTrampleEvent && !rule.trample) continue;
+      if (event instanceof PlayerPunchBlockEvent && !rule.punch) continue;
+      if (event instanceof PlayerTrampleBlockEvent && !rule.trample) continue;
       if (rule.region != null && !rule.region.contains(block)) continue;
 
       if (rule.filter != null) {
@@ -111,6 +122,10 @@ public class BlockDropsRuleSet {
       }
 
       custom = true;
+
+      if (rule.drops.kit != null) {
+        kits.add(rule.drops.kit);
+      }
 
       if (rule.drops.replacement != null) {
         replacement = rule.drops.replacement;
@@ -135,7 +150,14 @@ public class BlockDropsRuleSet {
     }
 
     return custom
-        ? new BlockDrops(items, experience, replacement, fallChance, landChance, fallSpeed)
+        ? new BlockDrops(
+            items,
+            new KitNode(kits, StaticFilter.ALLOW, null, null),
+            experience,
+            replacement,
+            fallChance,
+            landChance,
+            fallSpeed)
         : null;
   }
 }

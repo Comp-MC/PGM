@@ -10,31 +10,34 @@ import tc.oc.pgm.api.map.MapProtos;
 import tc.oc.pgm.api.map.factory.MapFactory;
 import tc.oc.pgm.api.map.factory.MapModuleFactory;
 import tc.oc.pgm.api.match.Match;
-import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.filters.FilterModule;
 import tc.oc.pgm.kits.KitModule;
 import tc.oc.pgm.util.xml.InvalidXMLException;
 import tc.oc.pgm.util.xml.XMLUtils;
 
-public class RegionModule implements MapModule {
-  protected final RFAContext rfaContext;
+public class RegionModule implements MapModule<RegionMatchModule> {
+  // Can't be final as this is initially the builder, later replaced by the built copy.
+  private RFAContext rfaContext;
+  private final Integer maxBuildHeight;
 
-  public RegionModule(RFAContext rfaContext) {
+  public RegionModule(RFAContext rfaContext, Integer maxBuildHeight) {
     this.rfaContext = rfaContext;
+    this.maxBuildHeight = maxBuildHeight;
   }
 
-  public RFAContext getRFAContext() {
-    return rfaContext;
+  public RFAContext.Builder getRFAContextBuilder() {
+    if (rfaContext instanceof RFAContext.Builder) return (RFAContext.Builder) rfaContext;
+    throw new UnsupportedOperationException("Cannot get RFA builder at this stage.");
   }
 
   @Override
-  public MatchModule createMatchModule(Match match) {
-    return new RegionMatchModule(match, this.rfaContext);
+  public RegionMatchModule createMatchModule(Match match) {
+    return new RegionMatchModule(match, this.rfaContext, maxBuildHeight);
   }
 
   public static class Factory implements MapModuleFactory<RegionModule> {
     @Override
-    public Collection<Class<? extends MapModule>> getSoftDependencies() {
+    public Collection<Class<? extends MapModule<?>>> getSoftDependencies() {
       return ImmutableList.of(FilterModule.class, KitModule.class);
     }
 
@@ -52,7 +55,7 @@ public class RegionModule implements MapModule {
       }
 
       // parse filter applications
-      RFAContext rfaContext = new RFAContext();
+      RFAContext.Builder rfaContext = new RFAContext.Builder();
       RegionFilterApplicationParser rfaParser =
           new RegionFilterApplicationParser(factory, rfaContext);
 
@@ -71,26 +74,32 @@ public class RegionModule implements MapModule {
         }
       }
 
-      // Support deprecated <lanes> syntax
+      // Support legacy <lanes> syntax
       for (Element laneEl : XMLUtils.flattenElements(doc.getRootElement(), "lanes", "lane")) {
         rfaParser.parseLane(laneEl);
       }
 
       // Support deprecated <playable> syntax
-      Element playableEl = XMLUtils.getUniqueChild(doc.getRootElement(), "playable");
-      if (playableEl != null) rfaParser.parsePlayable(playableEl);
+      if (factory.getProto().isOlderThan(MapProtos.MODULE_SUBELEMENT_VERSION)) {
+        Element playableEl = XMLUtils.getUniqueChild(doc.getRootElement(), "playable");
+        if (playableEl != null) rfaParser.parsePlayable(playableEl);
+      }
 
-      // Support deprecated <maxbuildheight> syntax
-      Element heightEl = XMLUtils.getUniqueChild(doc.getRootElement(), "maxbuildheight");
-      if (heightEl != null) rfaParser.parseMaxBuildHeight(heightEl);
+      // Support <maxbuildheight> syntax
+      Integer maxBuild =
+          rfaParser.parseMaxBuildHeight(
+              XMLUtils.getUniqueChild(doc.getRootElement(), "maxbuildheight"));
 
-      return new RegionModule(rfaContext);
+      return new RegionModule(rfaContext, maxBuild);
     }
   }
 
   @Override
   public void postParse(MapFactory factory, Logger logger, Document doc)
       throws InvalidXMLException {
+
+    rfaContext = getRFAContextBuilder().build();
+
     for (RegionFilterApplication rfa :
         factory.getFeatures().getAll(RegionFilterApplication.class)) {
       if (rfa.lendKit && !rfa.kit.isRemovable()) {

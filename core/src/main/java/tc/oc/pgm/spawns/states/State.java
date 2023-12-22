@@ -6,21 +6,19 @@ import org.bukkit.event.Event;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.PlayerAttackEntityEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
-import tc.oc.pgm.api.event.PlayerItemTransferEvent;
 import tc.oc.pgm.api.match.event.MatchFinishEvent;
 import tc.oc.pgm.api.match.event.MatchStartEvent;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.event.MatchPlayerDeathEvent;
+import tc.oc.pgm.api.player.event.ObserverInteractEvent;
 import tc.oc.pgm.events.PlayerJoinPartyEvent;
-import tc.oc.pgm.spawns.RespawnOptions;
 import tc.oc.pgm.spawns.SpawnMatchModule;
+import tc.oc.pgm.util.event.PlayerItemTransferEvent;
+import tc.oc.pgm.util.event.player.PlayerAttackEntityEvent;
 
 public abstract class State {
 
   protected final SpawnMatchModule smm;
-  protected final RespawnOptions options;
   protected final MatchPlayer player;
   protected final Player bukkit;
 
@@ -30,7 +28,10 @@ public abstract class State {
     this.smm = smm;
     this.player = player;
     this.bukkit = player.getBukkit();
-    this.options = smm.getRespawnOptions();
+  }
+
+  public boolean isCurrent() {
+    return entered && !exited;
   }
 
   public void enterState() {
@@ -77,7 +78,7 @@ public abstract class State {
 
   public void onEvent(final InventoryClickEvent event) {}
 
-  public void onEvent(final PlayerInteractEvent event) {}
+  public void onEvent(final ObserverInteractEvent event) {}
 
   public void onEvent(final PlayerAttackEntityEvent event) {}
 

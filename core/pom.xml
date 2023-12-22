@@ -8,9 +8,9 @@
 
     <parent>
         <relativePath>../pom.xml</relativePath>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.16-SNAPSHOT</version>
         <groupId>tc.oc.pgm</groupId>
-        <artifactId>PGM</artifactId>
+        <artifactId>pgm</artifactId>
     </parent>
 
     <name>Core</name>
@@ -22,7 +22,7 @@
         <dependency>
             <groupId>tc.oc.pgm</groupId>
             <artifactId>util</artifactId>
-            <version>0.10-SNAPSHOT</version>
+            <version>0.16-SNAPSHOT</version>
         </dependency>
     </dependencies>
     <build>
@@ -37,8 +37,22 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>cloud.commandframework</groupId>
+                            <artifactId>cloud-annotations</artifactId>
+                            <version>1.8.4</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.3</version>
+                <version>3.4.1</version>
                 <configuration>
                     <createDependencyReducedPom>false</createDependencyReducedPom>
                     <minimizeJar>true</minimizeJar>
@@ -46,10 +60,16 @@
                         <includes>
                             <include>tc.oc.pgm:*:*</include>
                             <include>org.jdom:jdom2:*</include>
-                            <include>net.kyori:text-*:*</include>
-                            <include>app.ashcon.intake:intake-*:*</include>
+                            <include>net.kyori:*:*</include>
+                            <include>cloud.commandframework:cloud-*:*</include>
+                            <include>io.leangen.geantyref:*:*</include>
+                            <include>me.lucko:commodore</include>
+                            <include>fr.mrmicky:*:*</include>
                             <include>org.eclipse.jgit:org.eclipse.jgit:*</include>
                             <include>org.slf4j:slf4j-api:*</include>
+                            <include>fr.minuskube.inv:smart-invs</include>
+                            <include>com.github.Pablete1234:exp4j:*</include>
+                            <include>io.github.bananapuncher714:nbteditor:*</include>
                         </includes>
                     </artifactSet>
                     <filters>
@@ -62,12 +82,20 @@
                     </filters>
                     <relocations combine.children="append">
                         <relocation>
-                            <pattern>app.ashcon.intake</pattern>
-                            <shadedPattern>tc.oc.pgm.lib.app.ashcon.intake</shadedPattern>
+                            <pattern>cloud.commandframework</pattern>
+                            <shadedPattern>tc.oc.pgm.lib.cloud.commandframework</shadedPattern>
                         </relocation>
                         <relocation>
-                            <pattern>net.kyori</pattern>
-                            <shadedPattern>tc.oc.pgm.lib.net.kyori</shadedPattern>
+                            <pattern>io.leangen.geantyref</pattern>
+                            <shadedPattern>tc.oc.pgm.lib.io.leangen.geantyref</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>me.lucko.commodore</pattern>
+                            <shadedPattern>tc.oc.pgm.lib.me.lucko.commodore</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>fr.mrmicky</pattern>
+                            <shadedPattern>tc.oc.pgm.lib.fr.mrmicky</shadedPattern>
                         </relocation>
                         <relocation>
                             <pattern>org.jdom2</pattern>
@@ -95,7 +123,7 @@
 
             <plugin>
                 <artifactId>maven-antrun-plugin</artifactId>
-                <version>1.8</version>
+                <version>3.1.0</version>
                 <executions>
                     <execution>
                         <id>jar</id>

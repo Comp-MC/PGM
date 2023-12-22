@@ -4,7 +4,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import java.time.Duration;
 import java.util.logging.Logger;
-import net.kyori.text.Component;
+import net.kyori.adventure.text.Component;
 import org.jdom2.Attribute;
 import org.jdom2.Document;
 import org.jdom2.Element;
@@ -13,15 +13,14 @@ import tc.oc.pgm.api.map.MapModule;
 import tc.oc.pgm.api.map.factory.MapFactory;
 import tc.oc.pgm.api.map.factory.MapModuleFactory;
 import tc.oc.pgm.api.match.Match;
-import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.countdowns.CountdownRunner;
-import tc.oc.pgm.filters.FilterParser;
+import tc.oc.pgm.filters.parse.FilterParser;
 import tc.oc.pgm.util.TimeUtils;
 import tc.oc.pgm.util.xml.InvalidXMLException;
 import tc.oc.pgm.util.xml.Node;
 import tc.oc.pgm.util.xml.XMLUtils;
 
-public class BroadcastModule implements MapModule {
+public class BroadcastModule implements MapModule<BroadcastMatchModule> {
   private final Multimap<Duration, Broadcast> broadcasts;
 
   public BroadcastModule(Multimap<Duration, Broadcast> broadcasts) {
@@ -29,7 +28,7 @@ public class BroadcastModule implements MapModule {
   }
 
   @Override
-  public MatchModule createMatchModule(Match match) {
+  public BroadcastMatchModule createMatchModule(Match match) {
     return new BroadcastMatchModule(match, this.broadcasts);
   }
 
@@ -43,8 +42,7 @@ public class BroadcastModule implements MapModule {
         for (Element elBroadcast : elBroadcasts.getChildren()) {
           final Node nodeBroadcast = new Node(elBroadcast);
           Broadcast.Type type =
-              XMLUtils.parseEnum(
-                  nodeBroadcast, elBroadcast.getName(), Broadcast.Type.class, "broadcast type");
+              XMLUtils.parseEnum(nodeBroadcast, elBroadcast.getName(), Broadcast.Type.class);
 
           Component message = XMLUtils.parseFormattedText(nodeBroadcast);
 

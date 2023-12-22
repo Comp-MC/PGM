@@ -1,21 +1,25 @@
 package tc.oc.pgm.api.player;
 
+import java.util.List;
 import java.util.UUID;
-import javax.annotation.Nullable;
 import org.bukkit.GameMode;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.PlayerInventory;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.filter.query.PlayerQuery;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.Tickable;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.Party;
 import tc.oc.pgm.api.setting.Settings;
-import tc.oc.pgm.filters.query.Query;
+import tc.oc.pgm.filters.Filterable;
 import tc.oc.pgm.kits.Kit;
+import tc.oc.pgm.util.Audience;
+import tc.oc.pgm.util.attribute.Attribute;
+import tc.oc.pgm.util.attribute.AttributeInstance;
 import tc.oc.pgm.util.bukkit.ViaUtils;
-import tc.oc.pgm.util.chat.Audience;
 import tc.oc.pgm.util.named.Named;
 
 /**
@@ -25,7 +29,8 @@ import tc.oc.pgm.util.named.Named;
  * this is used is to check if a {@link MatchPlayer} is involved in an event. If you need to access
  * or modify a {@link Player}, there should be a method added to {@link MatchPlayer}.
  */
-public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder {
+public interface MatchPlayer
+    extends Audience, Named, Tickable, InventoryHolder, Filterable<PlayerQuery>, PlayerQuery {
 
   /**
    * Get the {@link Match} of the {@link MatchPlayer}.
@@ -70,13 +75,6 @@ public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder 
    */
   @Nullable
   ParticipantState getParticipantState();
-
-  /**
-   * Get the filter {@link Query} that exclusively matches the {@link MatchPlayer}.
-   *
-   * @return The {@link Query} to match the {@link MatchPlayer}.
-   */
-  PlayerQuery getQuery();
 
   /**
    * Get the underlying {@link Player} that is associated with the {@link MatchPlayer}.
@@ -138,14 +136,6 @@ public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder 
   boolean isFrozen();
 
   /**
-   * Get whether the {@link MatchPlayer} is currently vanished. Determines whether to display to
-   * non-staff or not.
-   *
-   * @return Whether the {@link MatchPlayer} is vanished.
-   */
-  boolean isVanished();
-
-  /**
    * Get whether the {@link MatchPlayer} is using a legacy version (1.7.X)
    *
    * @return Whether the {@link MatchPlayer} is using a legacy version
@@ -169,8 +159,8 @@ public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder 
    */
   boolean canSee(MatchPlayer other);
 
-  /** Reset the {@link MatchPlayer} when changing between {@link org.bukkit.GameMode}s. */
-  void resetGamemode();
+  /** Reset the {@link MatchPlayer} ability to interact with the world . */
+  void resetInteraction();
 
   /** Reset the {@link #getInventory()} of the {@link MatchPlayer}. */
   void resetInventory();
@@ -219,13 +209,6 @@ public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder 
   void setGameMode(GameMode gameMode);
 
   /**
-   * Mark the {@link MatchPlayer} as vanished or not.
-   *
-   * @param vanished - Whether the player is vanished
-   */
-  void setVanished(boolean vanished);
-
-  /**
    * Get the protocol version of the {@link MatchPlayer}'s client
    *
    * @return The protocol version of the {@link MatchPlayer}'s client
@@ -241,6 +224,8 @@ public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder 
 
   String getPrefixedName();
 
+  AttributeInstance getAttribute(Attribute attribute);
+
   /**
    * Get the {@link GameMode} of the {@link MatchPlayer}.
    *
@@ -251,6 +236,32 @@ public interface MatchPlayer extends Audience, Named, Tickable, InventoryHolder 
   @Override
   PlayerInventory getInventory();
 
+  /**
+   * Get the current spectator target of the {@link MatchPlayer} if any
+   *
+   * @return the current spectator target if any
+   */
+  @Nullable
+  MatchPlayer getSpectatorTarget();
+
+  /**
+   * Get the players currently spectating the {@link MatchPlayer}, if any
+   *
+   * @return the players currently spectating, if any
+   */
+  List<MatchPlayer> getSpectators();
+
   @Deprecated
   void internalSetParty(Party party);
+
+  @Override
+  default Class<? extends Entity> getEntityType() {
+    return Player.class;
+  }
+
+  @Nullable
+  @Override
+  default MatchPlayer getPlayer() {
+    return this;
+  }
 }

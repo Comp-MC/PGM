@@ -18,9 +18,10 @@ public class DispenserTracker extends AbstractTracker<DispenserInfo> {
     super(DispenserInfo.class, tmm, match);
   }
 
+  @SuppressWarnings("deprecation")
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPlace(ParticipantBlockTransformEvent event) {
-    if (event.getNewState().getMaterial() == Material.DISPENSER) {
+    if (event.getNewState().getType() == Material.DISPENSER) {
       blocks().trackBlockState(event.getNewState(), new DispenserInfo(event.getPlayerState()));
     }
   }

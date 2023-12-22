@@ -1,6 +1,7 @@
 package tc.oc.pgm;
 
 import com.google.common.collect.Lists;
+import fr.minuskube.inv.InventoryManager;
 import java.io.File;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -14,51 +15,48 @@ import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
-import net.md_5.bungee.api.ChatColor;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.event.Listener;
+import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginLoader;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.Config;
 import tc.oc.pgm.api.Datastore;
-import tc.oc.pgm.api.Modules;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
+import tc.oc.pgm.api.integration.Integration;
 import tc.oc.pgm.api.map.Contributor;
 import tc.oc.pgm.api.map.MapInfo;
 import tc.oc.pgm.api.map.MapLibrary;
 import tc.oc.pgm.api.map.MapOrder;
 import tc.oc.pgm.api.map.exception.MapException;
 import tc.oc.pgm.api.map.factory.MapSourceFactory;
+import tc.oc.pgm.api.map.includes.MapIncludeProcessor;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchManager;
 import tc.oc.pgm.api.module.Module;
 import tc.oc.pgm.api.module.exception.ModuleLoadException;
-import tc.oc.pgm.api.player.VanishManager;
-import tc.oc.pgm.command.graph.CommandExecutor;
-import tc.oc.pgm.command.graph.CommandGraph;
-import tc.oc.pgm.community.command.CommunityCommandGraph;
-import tc.oc.pgm.community.features.VanishManagerImpl;
+import tc.oc.pgm.command.util.PGMCommandGraph;
 import tc.oc.pgm.db.CacheDatastore;
 import tc.oc.pgm.db.SQLDatastore;
+import tc.oc.pgm.integrations.SimpleVanishIntegration;
 import tc.oc.pgm.listeners.AntiGriefListener;
 import tc.oc.pgm.listeners.BlockTransformListener;
-import tc.oc.pgm.listeners.ChatDispatcher;
 import tc.oc.pgm.listeners.FormattingListener;
-import tc.oc.pgm.listeners.GeneralizingListener;
-import tc.oc.pgm.listeners.ItemTransferListener;
+import tc.oc.pgm.listeners.JoinLeaveAnnouncer;
 import tc.oc.pgm.listeners.MatchAnnouncer;
 import tc.oc.pgm.listeners.MotdListener;
 import tc.oc.pgm.listeners.PGMListener;
 import tc.oc.pgm.listeners.ServerPingDataListener;
 import tc.oc.pgm.listeners.WorldProblemListener;
 import tc.oc.pgm.map.MapLibraryImpl;
+import tc.oc.pgm.map.includes.MapIncludeProcessorImpl;
 import tc.oc.pgm.match.MatchManagerImpl;
-import tc.oc.pgm.match.NoopVanishManager;
 import tc.oc.pgm.namedecorations.ConfigDecorationProvider;
 import tc.oc.pgm.namedecorations.NameDecorationRegistry;
 import tc.oc.pgm.namedecorations.NameDecorationRegistryImpl;
@@ -68,7 +66,17 @@ import tc.oc.pgm.rotation.MapPoolManager;
 import tc.oc.pgm.rotation.RandomMapOrder;
 import tc.oc.pgm.tablist.MatchTabManager;
 import tc.oc.pgm.util.FileUtils;
+import tc.oc.pgm.util.bukkit.BukkitUtils;
+import tc.oc.pgm.util.bukkit.ViaUtils;
+import tc.oc.pgm.util.chunk.NullChunkGenerator;
+import tc.oc.pgm.util.compatability.SportPaperListener;
 import tc.oc.pgm.util.concurrent.BukkitExecutorService;
+import tc.oc.pgm.util.listener.ItemTransferListener;
+import tc.oc.pgm.util.listener.PlayerBlockListener;
+import tc.oc.pgm.util.listener.PlayerMoveListener;
+import tc.oc.pgm.util.nms.NMSHacks;
+import tc.oc.pgm.util.parser.SyntaxException;
+import tc.oc.pgm.util.tablist.TablistResizer;
 import tc.oc.pgm.util.text.TextException;
 import tc.oc.pgm.util.text.TextTranslations;
 import tc.oc.pgm.util.xml.InvalidXMLException;
@@ -79,6 +87,7 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
   private Logger gameLogger;
   private Datastore datastore;
   private MapLibrary mapLibrary;
+  private MapIncludeProcessor mapIncludeProcessor;
   private List<MapSourceFactory> mapSourceFactories;
   private MatchManager matchManager;
   private MatchTabManager matchTabManager;
@@ -86,7 +95,7 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
   private NameDecorationRegistry nameDecorationRegistry;
   private ScheduledExecutorService executorService;
   private ScheduledExecutorService asyncExecutorService;
-  private VanishManager vanishManager;
+  private InventoryManager inventoryManager;
 
   public PGMPlugin() {
     super();
@@ -109,7 +118,11 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
       return; // Indicates the plugin failed to load, so exit early
     }
 
-    Modules.registerAll();
+    // Sanity test PGM is running on a supported version before doing any work
+    NMSHacks.allocateEntityId();
+    // Fix before any audiences have the chance of creating
+    ViaUtils.removeViaChatFacet();
+
     Permissions.registerAll();
 
     final CommandSender console = getServer().getConsoleSender();
@@ -127,7 +140,8 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
     asyncExecutorService = new BukkitExecutorService(this, true);
 
     mapSourceFactories = new ArrayList<>();
-    mapLibrary = new MapLibraryImpl(gameLogger, mapSourceFactories);
+    mapIncludeProcessor = new MapIncludeProcessorImpl(gameLogger);
+    mapLibrary = new MapLibraryImpl(gameLogger, mapSourceFactories, mapIncludeProcessor);
 
     saveDefaultConfig(); // Writes a config file, if one does not exist.
     reloadConfig(); // Populates "this.config", if there is an error, will be null
@@ -167,11 +181,12 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
       }
     }
 
-    if (config.getMapPoolFile() == null) {
-      mapOrder = new RandomMapOrder(Lists.newArrayList(mapLibrary.getMaps()));
-    } else {
-      mapOrder = new MapPoolManager(logger, new File(config.getMapPoolFile()), datastore);
+    if (config.getMapPoolFile() != null) {
+      MapPoolManager manager =
+          new MapPoolManager(logger, config.getMapPoolFile().toFile(), datastore);
+      if (manager.getActiveMapPool() != null) mapOrder = manager;
     }
+    if (mapOrder == null) mapOrder = new RandomMapOrder(Lists.newArrayList(mapLibrary.getMaps()));
 
     // FIXME: To avoid startup lag, we "prefetch" usernames after map pools are loaded.
     // Change MapPoolManager so it doesn't depend on all maps being loaded.
@@ -200,13 +215,22 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
 
     matchManager = new MatchManagerImpl(logger);
 
-    vanishManager =
-        config.isCommunityMode()
-            ? new VanishManagerImpl(matchManager, executorService)
-            : new NoopVanishManager();
+    if (config.isVanishEnabled())
+      Integration.setVanishIntegration(new SimpleVanishIntegration(matchManager, executorService));
+
+    inventoryManager = new InventoryManager(this);
+    inventoryManager.init();
 
     if (config.showTabList()) {
       matchTabManager = new MatchTabManager(this);
+    }
+
+    if (config.resizeTabList()) {
+      if (this.getServer().getPluginManager().isPluginEnabled("ProtocolLib")) {
+        TablistResizer.registerAdapter(this);
+      } else {
+        logger.warning("ProtocolLib is required when 'ui.resize' is enabled");
+      }
     }
 
     if (!config.getUptimeLimit().isNegative()) {
@@ -221,7 +245,6 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
   public void onDisable() {
     if (matchTabManager != null) matchTabManager.disable();
     if (matchManager != null) matchManager.getMatches().forEachRemaining(Match::unload);
-    if (vanishManager != null) vanishManager.disable();
     if (executorService != null) executorService.shutdown();
     if (asyncExecutorService != null) asyncExecutorService.shutdown();
     if (datastore != null) datastore.close();
@@ -241,8 +264,7 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
 
     if (!startup) {
       getGameLogger()
-          .log(
-              Level.INFO, ChatColor.GREEN + TextTranslations.translate("admin.reloadConfig", null));
+          .log(Level.INFO, ChatColor.GREEN + TextTranslations.translate("admin.reloadConfig"));
     }
 
     final Logger logger = getLogger();
@@ -254,6 +276,11 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
     if (mapOrder != null) {
       mapOrder.reload();
     }
+  }
+
+  @Override
+  public ChunkGenerator getDefaultWorldGenerator(final String worldName, final String id) {
+    return NullChunkGenerator.INSTANCE;
   }
 
   @Override
@@ -307,18 +334,16 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
   }
 
   @Override
-  public VanishManager getVanishManager() {
-    return vanishManager;
+  public InventoryManager getInventoryManager() {
+    return inventoryManager;
   }
 
   private void registerCommands() {
-    final CommandGraph graph =
-        config.isCommunityMode() ? new CommunityCommandGraph() : new CommandGraph();
-
-    graph.register(vanishManager);
-    graph.register(ChatDispatcher.get());
-
-    new CommandExecutor(this, graph).register();
+    try {
+      new PGMCommandGraph(this);
+    } catch (Exception e) {
+      getLogger().log(Level.SEVERE, "Exception registering commands", e);
+    }
   }
 
   private void registerEvents(Object listener) {
@@ -328,21 +353,25 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
   }
 
   private void registerListeners() {
+    if (BukkitUtils.isSportPaper()) {
+      registerEvents(new SportPaperListener());
+    }
+    registerEvents(new PlayerBlockListener());
+    registerEvents(new PlayerMoveListener());
+    registerEvents(new ItemTransferListener());
     new BlockTransformListener(this).registerEvents();
     registerEvents(matchManager);
     if (matchTabManager != null) registerEvents(matchTabManager);
-    registerEvents(vanishManager);
     registerEvents(nameDecorationRegistry);
-    registerEvents(new GeneralizingListener(this));
-    registerEvents(new PGMListener(this, matchManager, vanishManager));
+    registerEvents(new PGMListener(this, matchManager));
     registerEvents(new FormattingListener());
     registerEvents(new AntiGriefListener(matchManager));
-    registerEvents(new ItemTransferListener());
     registerEvents(new RestartListener(this, matchManager));
     registerEvents(new WorldProblemListener(this));
     registerEvents(new MatchAnnouncer());
     registerEvents(new MotdListener());
-    registerEvents(new ServerPingDataListener(matchManager, mapOrder, getLogger(), vanishManager));
+    registerEvents(new ServerPingDataListener(matchManager, mapOrder, getLogger()));
+    registerEvents(new JoinLeaveAnnouncer(matchManager));
   }
 
   private class InGameHandler extends Handler {
@@ -368,35 +397,66 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
         return record.getMessage();
       }
 
-      final TextException textErr = tryException(TextException.class, thrown);
-      if (textErr != null) {
-        return format(null, textErr.getLocalizedMessage(), textErr.getCause());
-      }
-
       final InvalidXMLException xmlErr = tryException(InvalidXMLException.class, thrown);
-      if (xmlErr != null) {
-        return format(xmlErr.getFullLocation(), xmlErr.getMessage(), xmlErr.getCause());
-      }
-
       final MapException mapErr = tryException(MapException.class, thrown);
-      if (mapErr != null) {
-        return format(mapErr.getLocation(), mapErr.getMessage(), mapErr.getCause());
-      }
-
       final ModuleLoadException moduleErr = tryException(ModuleLoadException.class, thrown);
-      if (moduleErr != null) {
+
+      String location = null;
+      if (xmlErr != null) {
+        location = xmlErr.getFullLocation();
+      } else if (mapErr != null) {
+        location = mapErr.getLocation();
+      } else if (moduleErr != null) {
         final Class<? extends Module> module = moduleErr.getModule();
-        return format(
-            (module == null ? ModuleLoadException.class : module).getSimpleName(),
-            moduleErr.getMessage(),
-            moduleErr.getCause());
+        location = (module == null ? ModuleLoadException.class : module).getSimpleName();
       }
 
-      return null;
+      final TextException textErr = tryException(TextException.class, thrown);
+
+      Throwable cause = thrown.getCause();
+      String message = thrown.getMessage();
+      String detail = null;
+      if (textErr != null) {
+        cause = null;
+        message = textErr.getLocalizedMessage();
+      } else if (xmlErr != null) {
+        cause = xmlErr.getCause();
+        message = xmlErr.getMessage();
+
+        if (cause instanceof SyntaxException && xmlErr.getNode() != null) {
+          String value = xmlErr.getNode().getValue();
+
+          SyntaxException se = (SyntaxException) cause;
+          int start = se.getStartIdx();
+          if (start == -1 || start > value.length()) start = value.length();
+          int end = se.getEndIdx();
+          if (end == -1 || end < start) end = value.length();
+
+          detail =
+              value.substring(0, start)
+                  + ChatColor.RED
+                  + ChatColor.UNDERLINE
+                  + value.substring(start, end)
+                  + ChatColor.RESET
+                  + ChatColor.RED
+                  + value.substring(end);
+        }
+      } else if (mapErr != null) {
+        cause = mapErr.getCause();
+        message = mapErr.getMessage();
+      } else if (moduleErr != null) {
+        cause = moduleErr.getCause();
+        message = moduleErr.getMessage();
+      }
+
+      return format(location, message, detail, cause);
     }
 
     private String format(
-        @Nullable String location, @Nullable String message, @Nullable Throwable cause) {
+        @Nullable String location,
+        @Nullable String message,
+        @Nullable String detail,
+        @Nullable Throwable cause) {
       if (cause != null && Objects.equals(message, cause.getMessage())) cause = null;
       if (message == null) message = "<unknown message>";
       if (location == null) {
@@ -410,7 +470,8 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
           + ": "
           + ChatColor.RED
           + message
-          + (cause == null ? "" : ", caused by: " + cause.getMessage());
+          + (cause == null ? "" : ", caused by: " + cause.getMessage())
+          + (detail == null ? "" : ", detail: " + detail);
     }
 
     private @Nullable <E> E tryException(Class<E> type, @Nullable Throwable thrown) {

@@ -1,22 +1,20 @@
 package tc.oc.pgm.inventory;
 
+import static tc.oc.pgm.util.player.PlayerComponent.player;
+
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.apache.commons.lang.StringUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Villager;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -25,13 +23,11 @@ import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryClickedEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerPickupItemEvent;
-import org.bukkit.inventory.DoubleChestInventory;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemFlag;
@@ -39,6 +35,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
+import tc.oc.pgm.api.PGM;
+import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
@@ -51,23 +49,33 @@ import tc.oc.pgm.events.PlayerBlockTransformEvent;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
 import tc.oc.pgm.kits.WalkSpeedKit;
 import tc.oc.pgm.spawns.events.ParticipantSpawnEvent;
-import tc.oc.pgm.util.TimeUtils;
+import tc.oc.pgm.util.StringUtils;
+import tc.oc.pgm.util.attribute.Attribute;
+import tc.oc.pgm.util.attribute.AttributeInstance;
 import tc.oc.pgm.util.bukkit.BukkitUtils;
+import tc.oc.pgm.util.bukkit.OnlinePlayerMapAdapter;
+import tc.oc.pgm.util.named.NameStyle;
+import tc.oc.pgm.util.nms.NMSHacks;
 import tc.oc.pgm.util.text.TextTranslations;
 
 @ListenerScope(MatchScope.LOADED)
 public class ViewInventoryMatchModule implements MatchModule, Listener {
 
-  /**
-   * Amount of milliseconds after the match begins where players may not add / remove items from
-   * chests.
-   */
-  public static final Duration CHEST_PROTECT_TIME = Duration.ofSeconds(2);
-
   public static final Duration TICK = Duration.ofMillis(50);
 
-  protected final HashMap<String, InventoryTrackerEntry> monitoredInventories = new HashMap<>();
-  protected final HashMap<String, Instant> updateQueue = Maps.newHashMap();
+  private final Match match;
+
+  private final Map<Player, InventoryTrackerEntry> monitoredInventories;
+  private final Map<Player, Instant> updateQueue;
+
+  public ViewInventoryMatchModule(Match match) {
+    this.match = match;
+    this.monitoredInventories = new OnlinePlayerMapAdapter<>(PGM.get());
+    this.updateQueue = new OnlinePlayerMapAdapter<>(PGM.get());
+    match
+        .getExecutor(MatchScope.RUNNING)
+        .scheduleWithFixedDelay(this::checkAllMonitoredInventories, 0, 1, TimeUnit.SECONDS);
+  }
 
   public static int getInventoryPreviewSlot(int inventorySlot) {
     if (inventorySlot < 9) {
@@ -80,60 +88,29 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
     return inventorySlot; // default
   }
 
-  private final Match match;
-
-  public ViewInventoryMatchModule(Match match) {
-    this.match = match;
-    match
-        .getExecutor(MatchScope.RUNNING)
-        .scheduleWithFixedDelay(this::checkAllMonitoredInventories, 0, 1, TimeUnit.SECONDS);
-  }
-
   private void checkAllMonitoredInventories() {
     if (updateQueue.isEmpty()) return;
 
-    for (Iterator<Map.Entry<String, Instant>> iterator = updateQueue.entrySet().iterator();
-        iterator.hasNext(); ) {
-      Map.Entry<String, Instant> entry = iterator.next();
-      if (entry.getValue().isAfter(Instant.now())) continue;
-
-      Player player = Bukkit.getPlayerExact(entry.getKey());
-      if (player != null) {
-        checkMonitoredInventories(player);
-      }
-
-      iterator.remove();
-    }
-  }
-
-  @EventHandler(ignoreCancelled = true)
-  public void checkInventoryClick(final InventoryClickEvent event) {
-    if (event.getWhoClicked() instanceof Player) {
-      MatchPlayer player = this.match.getPlayer((Player) event.getWhoClicked());
-      if (player == null) {
-        return;
-      }
-      // we only cancel when the view is a chest because the other views tend to crash
-      if (!allowedInventoryType(event.getInventory().getType())) {
-        // cancel the click if the player cannot interact with the world or if the match has just
-        // started
-        if (!player.canInteract()
-            || (player.getMatch().isRunning()
-                && TimeUtils.isShorterThan(player.getMatch().getDuration(), CHEST_PROTECT_TIME))) {
-          event.setCancelled(true);
-        }
-      }
-    }
+    updateQueue
+        .entrySet()
+        .removeIf(
+            entry -> {
+              if (!entry.getValue().isAfter(match.getTick().instant)) {
+                checkMonitoredInventories(entry.getKey());
+                return true;
+              }
+              return false;
+            });
   }
 
   @EventHandler
   public void closeMonitoredInventory(final InventoryCloseEvent event) {
-    this.monitoredInventories.remove(event.getPlayer().getName());
+    this.monitoredInventories.remove((Player) event.getPlayer());
   }
 
   @EventHandler
   public void playerQuit(final PlayerPartyChangeEvent event) {
-    this.monitoredInventories.remove(event.getPlayer().getBukkit().getName());
+    this.monitoredInventories.remove(event.getPlayer().getBukkit());
   }
 
   @EventHandler(ignoreCancelled = true)
@@ -149,7 +126,14 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
       }
     } else if (event.getClickedEntity() instanceof InventoryHolder
         && !(event.getClickedEntity() instanceof Player)) {
+
       event.setCancelled(true);
+
+      if (event.getClickedEntity() instanceof Villager) {
+        event.getPlayer().getBukkit().openMerchantCopy((Villager) event.getClickedEntity());
+        return;
+      }
+
       this.previewInventory(
           event.getPlayer().getBukkit(),
           ((InventoryHolder) event.getClickedEntity()).getInventory());
@@ -162,7 +146,7 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
-  public void updateMonitoredClick(final InventoryClickedEvent event) {
+  public void updateMonitoredClick(final InventoryClickEvent event) {
     if (event.getWhoClicked() instanceof Player) {
       Player player = (Player) event.getWhoClicked();
 
@@ -176,11 +160,10 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
         inventory = event.getInventory();
       }
 
-      invLoop:
-      for (Map.Entry<String, InventoryTrackerEntry> entry :
-          new HashSet<>(
-              this.monitoredInventories.entrySet())) { // avoid ConcurrentModificationException
-        String pl = entry.getKey();
+      invLoop: // avoid ConcurrentModificationException by copying
+      for (Map.Entry<Player, InventoryTrackerEntry> entry :
+          new HashSet<>(this.monitoredInventories.entrySet())) {
+        Player pl = entry.getKey();
         InventoryTrackerEntry tracker = entry.getValue();
 
         // because a player can only be viewing one inventory at a time,
@@ -203,10 +186,9 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
         }
 
         if (playerInventory) {
-          this.previewPlayerInventory(
-              Bukkit.getServer().getPlayerExact(pl), (PlayerInventory) inventory);
+          this.previewPlayerInventory(pl, (PlayerInventory) inventory);
         } else {
-          this.previewInventory(Bukkit.getServer().getPlayerExact(pl), inventory);
+          this.previewInventory(pl, inventory);
         }
       }
     }
@@ -274,42 +256,36 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
   public boolean canPreviewInventory(Player viewer, Player holder) {
     MatchPlayer matchViewer = match.getPlayer(viewer);
     MatchPlayer matchHolder = match.getPlayer(holder);
-    return matchViewer != null
-        && matchHolder != null
-        && canPreviewInventory(matchViewer, matchHolder);
+    return canPreviewInventory(matchViewer, matchHolder);
   }
 
   public boolean canPreviewInventory(MatchPlayer viewer, MatchPlayer holder) {
-    return viewer.isObserving() && holder.isAlive();
-  }
-
-  protected static boolean allowedInventoryType(InventoryType type) {
-    switch (type) {
-      case CREATIVE:
-      case PLAYER:
-        return true;
-      default:
-        return false;
-    }
+    return viewer != null
+        && holder != null
+        && viewer.isObserving()
+        && holder.isAlive()
+        && viewer.getBukkit().hasPermission(Permissions.VIEW_INVENTORY);
   }
 
   protected void scheduleCheck(Player updater) {
-    if (this.updateQueue.containsKey(updater.getName())) return;
-
-    this.updateQueue.put(updater.getName(), Instant.now().plus(TICK));
+    if (this.updateQueue.containsKey(updater)) return;
+    this.updateQueue.put(updater, match.getTick().instant.plus(TICK));
   }
 
   protected void checkMonitoredInventories(Player updater) {
-    for (Map.Entry<String, InventoryTrackerEntry> entry : this.monitoredInventories.entrySet()) {
-      String pl = entry.getKey();
+    for (Map.Entry<Player, InventoryTrackerEntry> entry : this.monitoredInventories.entrySet()) {
+      Player pl = entry.getKey();
       InventoryTrackerEntry tracker = entry.getValue();
 
+      InventoryHolder invHolder = tracker.getWatched().getHolder();
+
       if (tracker.isPlayerInventory()) {
-        Player holder = (Player) tracker.getPlayerInventory().getHolder();
-        if (updater.getName().equals(holder.getName())) {
-          this.previewPlayerInventory(
-              Bukkit.getServer().getPlayerExact(pl), tracker.getPlayerInventory());
+        Player holder = (Player) invHolder;
+        if (updater.equals(holder)) {
+          this.previewPlayerInventory(pl, tracker.getPlayerInventory());
         }
+      } else if (invHolder != null) {
+        this.previewInventory(pl, invHolder.getInventory());
       }
     }
   }
@@ -322,7 +298,9 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
     Player holder = (Player) inventory.getHolder();
     // Ensure that the title of the inventory is <= 32 characters long to appease Minecraft's
     // restrictions on inventory titles
-    String title = StringUtils.substring(holder.getDisplayName(viewer), 0, 32);
+    String title =
+        StringUtils.substring(
+            TextTranslations.translateLegacy(player(holder, NameStyle.FANCY), viewer), 0, 32);
 
     Inventory preview = Bukkit.getServer().createInventory(viewer, 45, title);
 
@@ -360,25 +338,30 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
             ChatColor.LIGHT_PURPLE + TextTranslations.translate("preview.doubleJump", viewer));
       }
 
-      double knockbackResistance =
-          holder.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).getValue();
-      if (knockbackResistance > 0) {
-        specialLore.add(
-            ChatColor.LIGHT_PURPLE
-                + TextTranslations.translate(
-                    "preview.knockbackResistance",
-                    viewer,
-                    (int) Math.ceil(knockbackResistance * 100)));
+      AttributeInstance knockbackAttribute =
+          matchHolder.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE);
+      if (knockbackAttribute != null) {
+        double knockbackResistance = knockbackAttribute.getValue();
+        if (knockbackResistance > 0) {
+          specialLore.add(
+              ChatColor.LIGHT_PURPLE
+                  + TextTranslations.translate(
+                      "preview.knockbackResistance",
+                      viewer,
+                      (int) Math.ceil(knockbackResistance * 100)));
+        }
       }
 
-      double knockbackReduction = holder.getKnockbackReduction();
-      if (knockbackReduction > 0) {
-        specialLore.add(
-            ChatColor.LIGHT_PURPLE
-                + TextTranslations.translate(
-                    "preview.knockbackReduction",
-                    viewer,
-                    (int) Math.ceil(knockbackReduction * 100)));
+      if (BukkitUtils.isSportPaper()) {
+        double knockbackReduction = holder.getKnockbackReduction();
+        if (knockbackReduction > 0) {
+          specialLore.add(
+              ChatColor.LIGHT_PURPLE
+                  + TextTranslations.translate(
+                      "preview.knockbackReduction",
+                      viewer,
+                      (int) Math.ceil(knockbackReduction * 100)));
+        }
       }
 
       double walkSpeed = holder.getWalkSpeed();
@@ -467,21 +450,7 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
       previewPlayerInventory(viewer, (PlayerInventory) realInventory);
     } else {
       Inventory fakeInventory;
-      if (realInventory instanceof DoubleChestInventory) {
-        if (realInventory.hasCustomName()) {
-          fakeInventory =
-              Bukkit.createInventory(viewer, realInventory.getSize(), realInventory.getName());
-        } else {
-          fakeInventory = Bukkit.createInventory(viewer, realInventory.getSize());
-        }
-      } else {
-        if (realInventory.hasCustomName()) {
-          fakeInventory =
-              Bukkit.createInventory(viewer, realInventory.getType(), realInventory.getName());
-        } else {
-          fakeInventory = Bukkit.createInventory(viewer, realInventory.getType());
-        }
-      }
+      fakeInventory = NMSHacks.createFakeInventory(viewer, realInventory);
       fakeInventory.setContents(realInventory.getContents());
 
       this.showInventoryPreview(viewer, realInventory, fakeInventory);
@@ -494,14 +463,14 @@ public class ViewInventoryMatchModule implements MatchModule, Listener {
       return;
     }
 
-    InventoryTrackerEntry entry = this.monitoredInventories.get(viewer.getName());
+    InventoryTrackerEntry entry = this.monitoredInventories.get(viewer);
     if (entry != null
         && entry.getWatched().equals(realInventory)
         && entry.getPreview().getSize() == fakeInventory.getSize()) {
       entry.getPreview().setContents(fakeInventory.getContents());
     } else {
       entry = new InventoryTrackerEntry(realInventory, fakeInventory);
-      this.monitoredInventories.put(viewer.getName(), entry);
+      this.monitoredInventories.put(viewer, entry);
       viewer.openInventory(fakeInventory);
     }
   }

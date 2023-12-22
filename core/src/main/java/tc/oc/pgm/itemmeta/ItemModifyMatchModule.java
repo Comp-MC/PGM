@@ -1,17 +1,23 @@
 package tc.oc.pgm.itemmeta;
 
+import org.bukkit.entity.Item;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.player.PlayerPickupItemEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.events.ListenerScope;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 @ListenerScope(MatchScope.LOADED)
 public class ItemModifyMatchModule implements MatchModule, Listener {
@@ -22,7 +28,12 @@ public class ItemModifyMatchModule implements MatchModule, Listener {
     this.imm = imm;
   }
 
-  private boolean applyRules(ItemStack stack) {
+  /**
+   * Apply {@link ItemRule}s to the given item stack if applicable.
+   *
+   * @return {@code true} if any rules were applied to the given item stack, {@code false} if not
+   */
+  public boolean applyRules(ItemStack stack) {
     return imm.applyRules(stack);
   }
 
@@ -53,10 +64,16 @@ public class ItemModifyMatchModule implements MatchModule, Listener {
 
   @EventHandler
   public void onInventoryOpen(InventoryOpenEvent event) {
-    ItemStack[] contents = event.getInventory().getContents();
+    Inventory inventory = event.getInventory();
+    // Custom GUIs use chest inventory type with player as the holder
+    if (inventory.getType() == InventoryType.CHEST && inventory.getHolder() instanceof Player) {
+      return;
+    }
+
+    ItemStack[] contents = inventory.getContents();
     for (int i = 0; i < contents.length; i++) {
       if (applyRules(contents[i])) {
-        event.getInventory().setItem(i, contents[i]);
+        inventory.setItem(i, contents[i]);
       }
     }
   }
@@ -67,6 +84,21 @@ public class ItemModifyMatchModule implements MatchModule, Listener {
     ItemStack stack = event.getItem();
     if (applyRules(stack)) {
       event.setItem(stack);
+    }
+  }
+
+  @EventHandler(ignoreCancelled = true)
+  public void onItemPickup(PlayerPickupItemEvent event) {
+    // Needed for players picking up arrows stuck in blocks
+    if (!NMSHacks.isCraftItemArrowEntity(event.getItem())) return;
+
+    final Item item = event.getItem();
+    final ItemStack itemStack = item.getItemStack();
+
+    if (applyRules(itemStack)) {
+      event.setCancelled(true);
+      NMSHacks.fakePlayerItemPickup(event.getPlayer(), item);
+      event.getPlayer().getInventory().addItem(itemStack);
     }
   }
 }

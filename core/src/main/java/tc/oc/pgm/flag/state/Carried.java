@@ -1,15 +1,22 @@
 package tc.oc.pgm.flag.state;
 
+import static net.kyori.adventure.text.Component.empty;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+import static net.kyori.adventure.title.Title.title;
+import static tc.oc.pgm.util.TimeUtils.fromTicks;
+
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
-import net.kyori.text.format.TextDecoration;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.title.Title;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -17,6 +24,8 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.Nullable;
+import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.filter.query.Query;
 import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.api.party.Competitor;
@@ -27,28 +36,27 @@ import tc.oc.pgm.filters.query.PlayerQuery;
 import tc.oc.pgm.filters.query.PlayerStateQuery;
 import tc.oc.pgm.flag.Flag;
 import tc.oc.pgm.flag.FlagDefinition;
-import tc.oc.pgm.flag.Net;
+import tc.oc.pgm.flag.NetDefinition;
 import tc.oc.pgm.flag.Post;
 import tc.oc.pgm.flag.event.FlagCaptureEvent;
 import tc.oc.pgm.flag.event.FlagStateChangeEvent;
 import tc.oc.pgm.goals.events.GoalEvent;
 import tc.oc.pgm.kits.ArmorType;
 import tc.oc.pgm.kits.Kit;
-import tc.oc.pgm.kits.KitMatchModule;
 import tc.oc.pgm.score.ScoreMatchModule;
 import tc.oc.pgm.scoreboard.SidebarMatchModule;
 import tc.oc.pgm.spawns.events.ParticipantDespawnEvent;
 import tc.oc.pgm.teams.TeamFactory;
 import tc.oc.pgm.teams.TeamMatchModule;
 import tc.oc.pgm.util.named.NameStyle;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 /** State of a flag when a player has picked it up and is wearing the banner on their head. */
 public class Carried extends Spawned implements Missing {
 
   protected final MatchPlayer carrier;
   protected ItemStack helmetItem;
-  protected boolean helmetLocked;
-  protected @Nullable Net deniedByNet;
+  protected @Nullable NetDefinition deniedByNet;
   protected @Nullable Flag deniedByFlag;
   protected @Nullable Component lastMessage;
 
@@ -60,18 +68,6 @@ public class Carried extends Spawned implements Missing {
     this.carrier = carrier;
     this.dropLocations.add(
         dropLocation); // Need an initial dropLocation in case the carrier never generates ones
-    if (this.flag.getDefinition().willShowRespawnOnPickup()) {
-      String postName = this.flag.predeterminePost(this.post);
-      if (postName != null) { // The post needs a name in order to display the message.
-        this.flag
-            .getMatch()
-            .sendMessage(
-                TranslatableComponent.of(
-                    "flag.willRespawn.next",
-                    this.flag.getComponentName(),
-                    TextComponent.of(postName, TextColor.AQUA)));
-      }
-    }
   }
 
   @Override
@@ -114,16 +110,30 @@ public class Carried extends Spawned implements Missing {
     if (kit != null) carrier.applyKit(kit, false);
 
     this.helmetItem = this.carrier.getBukkit().getInventory().getHelmet();
-    this.helmetLocked =
-        this.flag
-            .getMatch()
-            .getModule(KitMatchModule.class)
-            .lockArmorSlot(this.carrier, ArmorType.HELMET, false);
-
     this.carrier.getBukkit().getInventory().setHelmet(this.flag.getBannerItem().clone());
+
+    PGM.get()
+        .getExecutor()
+        .schedule(
+            () -> NMSHacks.sendLegacyWearing(carrier.getBukkit(), 4, flag.getLegacyBannerItem()),
+            50L,
+            TimeUnit.MILLISECONDS);
 
     SidebarMatchModule smm = this.flag.getMatch().getModule(SidebarMatchModule.class);
     if (smm != null) smm.blinkGoal(this.flag, 2, null);
+
+    if (this.flag.getDefinition().willShowRespawnOnPickup()) {
+      String postName = post.peekNext(flag).getPostName();
+      if (postName != null) { // The post needs a name in order to display the message.
+        this.flag
+            .getMatch()
+            .sendMessage(
+                translatable(
+                    "flag.willRespawn.next",
+                    this.flag.getComponentName(),
+                    text(postName, NamedTextColor.AQUA)));
+      }
+    }
   }
 
   @Override
@@ -131,15 +141,10 @@ public class Carried extends Spawned implements Missing {
     SidebarMatchModule smm = this.flag.getMatch().getModule(SidebarMatchModule.class);
     if (smm != null) smm.stopBlinkingGoal(this.flag);
 
-    this.carrier.showHotbar(TextComponent.empty());
+    this.carrier.sendActionBar(empty());
 
     this.carrier.getInventory().remove(this.flag.getBannerItem());
     this.carrier.getInventory().setHelmet(this.helmetItem);
-
-    this.flag
-        .getMatch()
-        .getModule(KitMatchModule.class)
-        .lockArmorSlot(this.carrier, ArmorType.HELMET, this.helmetLocked);
 
     Kit kit = this.flag.getDefinition().getDropKit();
     if (kit != null) this.carrier.applyKit(kit, false);
@@ -163,24 +168,24 @@ public class Carried extends Spawned implements Missing {
       if (this.flag.getDefinition().getCarryMessage() != null) {
         message = this.flag.getDefinition().getCarryMessage();
       } else {
-        message = TranslatableComponent.of("flag.carrying", this.flag.getComponentName());
+        message = translatable("flag.carrying", this.flag.getComponentName());
       }
 
-      return message.color(TextColor.AQUA).decoration(TextDecoration.BOLD, true);
+      return message.color(NamedTextColor.AQUA).decoration(TextDecoration.BOLD, true);
     } else {
       if (this.deniedByNet.getDenyMessage() != null) {
         message = this.deniedByNet.getDenyMessage();
       } else if (this.deniedByFlag != null) {
         message =
-            TranslatableComponent.of(
+            translatable(
                 "flag.captureDenied.byFlag",
                 this.flag.getComponentName(),
                 this.deniedByFlag.getComponentName());
       } else {
-        message = TranslatableComponent.of("flag.captureDenied", this.flag.getComponentName());
+        message = translatable("flag.captureDenied", this.flag.getComponentName());
       }
 
-      return message.color(TextColor.RED).decoration(TextDecoration.BOLD, true);
+      return message.color(NamedTextColor.RED).decoration(TextDecoration.BOLD, true);
     }
   }
 
@@ -189,15 +194,16 @@ public class Carried extends Spawned implements Missing {
     super.tickRunning();
 
     Component message = this.getMessage();
-    this.carrier.showHotbar(message);
+    this.carrier.sendActionBar(message);
 
     if (!message.equals(this.lastMessage)) {
       this.lastMessage = message;
-      this.carrier.showTitle(TextComponent.empty(), message, 0, 5, 35);
+      this.carrier.showTitle(
+          title(empty(), message, Title.Times.of(Duration.ZERO, fromTicks(5), fromTicks(35))));
     }
 
     ScoreMatchModule smm = this.flag.getMatch().getModule(ScoreMatchModule.class);
-    if (smm != null && this.flag.getDefinition().getPointsPerSecond() > 0) {
+    if (smm != null && this.flag.getDefinition().getPointsPerSecond() != 0) {
       smm.incrementScore(
           this.getBeneficiary(this.flag.getDefinition().getOwner()),
           this.flag.getDefinition().getPointsPerSecond() / 20D);
@@ -231,14 +237,13 @@ public class Carried extends Spawned implements Missing {
     this.recover();
   }
 
-  protected void captureFlag(Net net) {
-    this.carrier.sendMessage(
-        TranslatableComponent.of("flag.capture.you", this.flag.getComponentName()));
+  protected void captureFlag(NetDefinition net) {
+    this.carrier.sendMessage(translatable("flag.capture.you", this.flag.getComponentName()));
 
     this.flag
         .getMatch()
         .sendMessage(
-            TranslatableComponent.of(
+            translatable(
                 "flag.capture.player",
                 this.flag.getComponentName(),
                 this.carrier.getName(NameStyle.COLOR)));
@@ -259,7 +264,9 @@ public class Carried extends Spawned implements Missing {
       }
     }
 
-    Post post = net.getReturnPost() != null ? net.getReturnPost() : this.post;
+    Post post = this.post;
+    if (net.getReturnPost() != null) post = flag.getPost(net.getReturnPost());
+
     if (post.isPermanent()) {
       this.flag.transition(new Completed(this.flag, post));
     } else {
@@ -360,7 +367,7 @@ public class Carried extends Spawned implements Missing {
       this.deniedByNet = null;
     }
 
-    for (Net net : this.flag.getNets()) {
+    for (NetDefinition net : this.flag.getNets()) {
       if (net.getRegion().contains(to)) {
         if (tryCapture(net)) {
           return;
@@ -375,7 +382,7 @@ public class Carried extends Spawned implements Missing {
     }
   }
 
-  protected boolean tryCapture(Net net) {
+  protected boolean tryCapture(NetDefinition net) {
     for (FlagDefinition returnableDef : net.getRecoverableFlags()) {
       Flag returnable = returnableDef.getGoal(this.flag.getMatch());
       if (returnable.isCurrent(Carried.class)) {
@@ -393,16 +400,16 @@ public class Carried extends Spawned implements Missing {
   }
 
   @Override
-  public org.bukkit.ChatColor getStatusColor(Party viewer) {
+  public TextColor getStatusColor(Party viewer) {
     if (this.flag.getDefinition().hasMultipleCarriers()) {
-      return this.carrier.getParty().getColor();
+      return this.carrier.getParty().getTextColor();
     } else {
       return super.getStatusColor(viewer);
     }
   }
 
   @Override
-  public String getStatusSymbol(Party viewer) {
+  public Component getStatusSymbol(Party viewer) {
     return Flag.CARRIED_SYMBOL;
   }
 }

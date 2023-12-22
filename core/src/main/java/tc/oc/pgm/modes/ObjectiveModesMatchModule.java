@@ -1,32 +1,54 @@
 package tc.oc.pgm.modes;
 
-import com.google.common.base.Predicate;
-import com.google.common.collect.Collections2;
+import static net.kyori.adventure.key.Key.key;
+import static net.kyori.adventure.sound.Sound.sound;
+import static net.kyori.adventure.text.Component.text;
+
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.format.TextColor;
+import java.util.stream.Collectors;
+import net.kyori.adventure.sound.Sound;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
+import tc.oc.pgm.api.match.MatchScope;
+import tc.oc.pgm.api.module.exception.ModuleLoadException;
 import tc.oc.pgm.countdowns.CountdownContext;
-import tc.oc.pgm.util.chat.Sound;
+import tc.oc.pgm.events.ListenerScope;
+import tc.oc.pgm.filters.FilterMatchModule;
 
-public class ObjectiveModesMatchModule implements MatchModule {
+@ListenerScope(MatchScope.LOADED)
+public class ObjectiveModesMatchModule implements MatchModule, Listener {
 
-  private static final Sound SOUND = new Sound("mob.zombie.remedy", 0.15f, 1.2f);
+  private static final Sound SOUND =
+      sound(key("mob.zombie.remedy"), Sound.Source.MASTER, 0.15f, 1.2f);
+
+  // Sort by what's the next known mode to trigger
+  // - Sort by remaining time (applicable while match is running).
+  // - Non-triggered filtered modes go last (if triggered, they'd have a remaining time)
+  // - Then sort by after time defined in monument mode
+  // - Lastly sort by name
+  private static final Comparator<ModeChangeCountdown> MODE_COMPARATOR =
+      Comparator.comparing(
+              ModeChangeCountdown::getRemaining, Comparator.nullsLast(Comparator.naturalOrder()))
+          .thenComparing(
+              ModeChangeCountdown::getMode,
+              Comparator.comparing((Mode m) -> m.getFilter() != null)
+                  .thenComparing(Mode::getAfter)
+                  .thenComparing(Mode::getLegacyName));
 
   private final Match match;
-  private final List<Mode> modes;
+  private final ImmutableList<Mode> modes;
   private final List<ModeChangeCountdown> countdowns;
   private final CountdownContext countdownContext;
 
-  public ObjectiveModesMatchModule(Match match, List<Mode> modes) {
+  public ObjectiveModesMatchModule(Match match, ImmutableList<Mode> modes) {
     this.match = match;
     this.modes = modes;
     this.countdowns = new ArrayList<>(this.modes.size());
@@ -34,17 +56,31 @@ public class ObjectiveModesMatchModule implements MatchModule {
   }
 
   @Override
-  public void load() {
+  public void load() throws ModuleLoadException {
+    FilterMatchModule fmm = match.needModule(FilterMatchModule.class);
     for (Mode mode : this.modes) {
       ModeChangeCountdown countdown = new ModeChangeCountdown(match, this, mode);
       this.countdowns.add(countdown);
+      if (mode.getFilter() != null) {
+        // if filter returns ALLOW at any time in the match, start countdown for mode change
+        fmm.onRise(
+            Match.class,
+            mode.getFilter(),
+            listener -> {
+              if (!this.countdownContext.isRunning(countdown) && match.isRunning()) {
+                this.countdownContext.start(countdown, countdown.getMode().getAfter());
+              }
+            });
+      }
     }
   }
 
   @Override
   public void enable() {
     for (ModeChangeCountdown countdown : this.countdowns) {
-      this.countdownContext.start(countdown, countdown.getMode().getAfter());
+      if (countdown.getMode().getFilter() == null) {
+        this.countdownContext.start(countdown, countdown.getMode().getAfter());
+      }
     }
   }
 
@@ -53,6 +89,10 @@ public class ObjectiveModesMatchModule implements MatchModule {
     for (ModeChangeCountdown countdown : this.getAllCountdowns()) {
       this.countdownContext.cancel(countdown);
     }
+  }
+
+  public ImmutableList<Mode> getModes() {
+    return modes;
   }
 
   public CountdownContext getCountdown() {
@@ -65,42 +105,35 @@ public class ObjectiveModesMatchModule implements MatchModule {
         .build();
   }
 
-  public List<ModeChangeCountdown> getSortedCountdowns() {
-    List<ModeChangeCountdown> listClone = new ArrayList<>(this.countdowns);
-    Collections.sort(listClone);
-
-    return listClone;
+  public List<ModeChangeCountdown> getSortedCountdowns(boolean includeAll) {
+    return this.countdowns.stream()
+        .filter(mcc -> includeAll || mcc.getRemaining() != null)
+        .sorted(MODE_COMPARATOR)
+        .collect(Collectors.toList());
   }
 
   public List<ModeChangeCountdown> getActiveCountdowns() {
-    List<ModeChangeCountdown> activeCountdowns =
-        new ArrayList<>(
-            Collections2.filter(
-                this.getAllCountdowns(),
-                new Predicate<ModeChangeCountdown>() {
-                  @Override
-                  public boolean apply(@Nullable ModeChangeCountdown countdown) {
-                    return ObjectiveModesMatchModule.this
-                            .getCountdown()
-                            .getTimeLeft(countdown)
-                            .getSeconds()
-                        > 0;
-                  }
-                }));
-    Collections.sort(activeCountdowns);
+    return getAllCountdowns().stream()
+        .filter(mcc -> mcc.getRemaining().getSeconds() > 0)
+        .sorted()
+        .collect(Collectors.toList());
+  }
 
-    return activeCountdowns;
+  public ModeChangeCountdown getCountdown(Mode mode) {
+    return this.countdowns.stream().filter(mcc -> mcc.getMode() == mode).findFirst().orElse(null);
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onObjectiveModeChange(ObjectiveModeChangeEvent event) {
-    Component broadcast =
-        TextComponent.builder()
-            .append("> > > > ", TextColor.DARK_AQUA)
-            .append(event.getName(), TextColor.DARK_RED)
-            .append(" < < < <", TextColor.DARK_AQUA)
-            .build();
-    event.getMatch().sendMessage(broadcast);
-    event.getMatch().playSound(SOUND);
+    if (event.isVisible()) {
+      Component broadcast =
+          text()
+              .append(text("> > > > ", NamedTextColor.DARK_AQUA))
+              .append(text(event.getName(), NamedTextColor.DARK_RED))
+              .append(text(" < < < <", NamedTextColor.DARK_AQUA))
+              .build();
+      match.sendMessage(broadcast);
+      match.playSound(SOUND);
+    }
   }
 }

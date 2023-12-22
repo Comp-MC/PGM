@@ -1,12 +1,14 @@
 package tc.oc.pgm.controlpoint;
 
 import java.time.Duration;
-import javax.annotation.Nullable;
 import org.bukkit.util.BlockVector;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.feature.FeatureInfo;
 import tc.oc.pgm.api.filter.Filter;
+import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.region.Region;
 import tc.oc.pgm.goals.GoalDefinition;
+import tc.oc.pgm.goals.ShowOptions;
 import tc.oc.pgm.teams.TeamFactory;
 
 /**
@@ -38,6 +40,18 @@ public class ControlPointDefinition extends GoalDefinition {
   // Base time for the point to transition between states
   private final Duration timeToCapture;
 
+  // Time it takes for a point to decay while unowned. (Time is accurate when near 100% capture)
+  private final double decayRate;
+
+  // Time it takes for a point to decay while contested. (Time is accurate when near 100% capture)
+  private final double contestedRate;
+
+  // Time it takes for a point to recover to captured state. (Accurate when almost uncaptured)
+  private final double recoveryRate;
+
+  // Time it takes for a point to transition to neutral state.
+  private final double ownedDecayRate;
+
   // Capture time multiplier for increasing or decreasing capture time based on the number of
   // players on the point
   private final float timeMultiplier;
@@ -54,10 +68,6 @@ public class ControlPointDefinition extends GoalDefinition {
 
   private final CaptureCondition captureCondition;
 
-  // true: progress is retained if capturing is interrupted
-  // false: progress resets to zero if capturing is interrupted
-  private final boolean incrementalCapture;
-
   // true: point must transition through unowned state to change owners
   // false: point transitions directly from one owner to the next
   // NOTE: points always start in an unowned state, regardless of this value
@@ -68,6 +78,9 @@ public class ControlPointDefinition extends GoalDefinition {
 
   // Rate that the owner's score increases, or 0 if the CP does not affect score
   private final float pointsPerSecond;
+
+  // Set number of points given to owner
+  private final float pointsOwner;
 
   // If this is less than +inf, the effective pointsPerSecond will increase over time
   // at an exponential rate, such that it doubles every time this many seconds elapses.
@@ -80,7 +93,7 @@ public class ControlPointDefinition extends GoalDefinition {
       @Nullable String id,
       String name,
       @Nullable Boolean required,
-      boolean visible,
+      ShowOptions showOptions,
       Region captureRegion,
       Filter captureFilter,
       Filter playerFilter,
@@ -89,17 +102,21 @@ public class ControlPointDefinition extends GoalDefinition {
       Filter visualMaterials,
       BlockVector capturableDisplayBeacon,
       Duration timeToCapture,
+      double decayRate,
+      double recoveryRate,
+      double ownedDecayRate,
+      double contestedRate,
       float timeMultiplier,
       @Nullable TeamFactory initialOwner,
       CaptureCondition captureCondition,
-      boolean incrementalCapture,
       boolean neutralState,
       boolean permanent,
       float pointsPerSecond,
+      float pointsOwner,
       float pointsGrowth,
       boolean progress) {
 
-    super(id, name, required, visible);
+    super(id, name, required, showOptions);
     this.captureRegion = captureRegion;
     this.captureFilter = captureFilter;
     this.playerFilter = playerFilter;
@@ -108,15 +125,23 @@ public class ControlPointDefinition extends GoalDefinition {
     this.visualMaterials = visualMaterials;
     this.capturableDisplayBeacon = capturableDisplayBeacon;
     this.timeToCapture = timeToCapture;
+    this.decayRate = decayRate;
+    this.recoveryRate = recoveryRate;
+    this.ownedDecayRate = ownedDecayRate;
+    this.contestedRate = contestedRate;
     this.timeMultiplier = timeMultiplier;
     this.initialOwner = initialOwner;
     this.captureCondition = captureCondition;
-    this.incrementalCapture = incrementalCapture;
     this.neutralState = neutralState;
     this.permanent = permanent;
     this.pointsPerSecond = pointsPerSecond;
+    this.pointsOwner = pointsOwner;
     this.pointsGrowth = pointsGrowth;
     this.showProgress = progress;
+  }
+
+  public ControlPoint build(Match match) {
+    return new ControlPoint(match, this);
   }
 
   @Override
@@ -127,14 +152,20 @@ public class ControlPointDefinition extends GoalDefinition {
         + this.getId()
         + " timeToCapture="
         + this.getTimeToCapture()
+        + " decayRate="
+        + this.getDecayRate()
+        + " recoveryRate="
+        + this.getRecoveryRate()
+        + " ownedDecayRate="
+        + this.getOwnedDecayRate()
+        + " contestedRate="
+        + this.getContestedRate()
         + " timeMultiplier="
         + this.getTimeMultiplier()
         + " initialOwner="
         + this.getInitialOwner()
         + " captureCondition="
         + this.getCaptureCondition()
-        + " incrementalCapture="
-        + this.isIncrementalCapture()
         + " neutralState="
         + this.hasNeutralState()
         + " permanent="
@@ -151,8 +182,8 @@ public class ControlPointDefinition extends GoalDefinition {
         + this.getControllerDisplayRegion()
         + " beacon="
         + this.getCapturableDisplayBeacon()
-        + " visible="
-        + this.isVisible();
+        + " options="
+        + this.getShowOptions();
   }
 
   public Region getCaptureRegion() {
@@ -187,6 +218,22 @@ public class ControlPointDefinition extends GoalDefinition {
     return this.timeToCapture;
   }
 
+  public double getDecayRate() {
+    return this.decayRate;
+  }
+
+  public double getRecoveryRate() {
+    return this.recoveryRate;
+  }
+
+  public double getOwnedDecayRate() {
+    return this.ownedDecayRate;
+  }
+
+  public double getContestedRate() {
+    return this.contestedRate;
+  }
+
   public float getTimeMultiplier() {
     return this.timeMultiplier;
   }
@@ -200,10 +247,6 @@ public class ControlPointDefinition extends GoalDefinition {
     return this.captureCondition;
   }
 
-  public boolean isIncrementalCapture() {
-    return this.incrementalCapture;
-  }
-
   public boolean hasNeutralState() {
     return this.neutralState;
   }
@@ -213,11 +256,15 @@ public class ControlPointDefinition extends GoalDefinition {
   }
 
   public boolean affectsScore() {
-    return this.pointsPerSecond > 0;
+    return this.pointsPerSecond != 0;
   }
 
   public float getPointsPerSecond() {
     return this.pointsPerSecond;
+  }
+
+  public float getPointsOwner() {
+    return this.pointsOwner;
   }
 
   public float getPointsGrowth() {

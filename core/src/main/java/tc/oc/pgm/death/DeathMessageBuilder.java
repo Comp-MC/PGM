@@ -1,14 +1,16 @@
 package tc.oc.pgm.death;
 
+import static net.kyori.adventure.text.Component.space;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+
 import java.util.SortedSet;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
+import net.kyori.adventure.text.Component;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.api.player.event.MatchPlayerDeathEvent;
@@ -53,8 +55,10 @@ public class DeathMessageBuilder {
   private final boolean predicted;
 
   private String key;
-  private Component weapon = TextComponent.empty();
-  private Component mob = TextComponent.empty();
+  // FIXME: Adventure filters out empty() from translatable arguments
+  // and it causes issues with the indexes of translations.
+  private Component weapon = space();
+  private Component mob = space();
   private Long distance;
 
   public DeathMessageBuilder(MatchPlayerDeathEvent event, Logger logger) {
@@ -67,13 +71,9 @@ public class DeathMessageBuilder {
   }
 
   public Component getMessage() {
-    Component message = TranslatableComponent.of(key, getArgs());
+    Component message = translatable(key, getArgs());
 
-    if (predicted)
-      message =
-          message
-              .append(TextComponent.space())
-              .append(TranslatableComponent.of("death.predictedSuffix"));
+    if (predicted) message = message.append(space()).append(translatable("death.predictedSuffix"));
 
     return message;
   }
@@ -81,13 +81,10 @@ public class DeathMessageBuilder {
   Component[] getArgs() {
     Component[] args = new Component[5];
     args[0] = victim.getName(NameStyle.COLOR);
-    args[1] = killer == null ? TextComponent.empty() : killer.getName(NameStyle.COLOR);
+    args[1] = killer == null ? space() : killer.getName(NameStyle.COLOR);
     args[2] = weapon;
     args[3] = mob;
-    args[4] =
-        distance == null
-            ? TextComponent.empty()
-            : TranslatableComponent.of(String.valueOf(distance));
+    args[4] = distance == null ? space() : text(distance);
     return args;
   }
 
@@ -187,7 +184,7 @@ public class DeathMessageBuilder {
   }
 
   boolean potion(PotionInfo potionInfo) {
-    if (option("potion")) {
+    if (potionInfo.getPotionEffect() != null && option("potion")) {
       weapon = potionInfo.getName();
       return true;
     }
@@ -235,7 +232,7 @@ public class DeathMessageBuilder {
       } else if (option("entity")) {
         // PotionInfo.getName returns a potion name,
         // which doesn't work outside a potion death message.
-        weapon = TranslatableComponent.of("item.potion.name");
+        weapon = translatable("item.potion.name");
         return true;
       }
     } else if (info instanceof EntityInfo) {
@@ -341,6 +338,7 @@ public class DeathMessageBuilder {
     PhysicalInfo info = projectile.getProjectile();
     if (info instanceof EntityInfo) {
       switch (((EntityInfo) info).getEntityType()) {
+        case UNKNOWN:
         case ARROW:
         case WITHER_SKULL:
           info = null; // "shot by arrow" is redundant
@@ -355,9 +353,19 @@ public class DeathMessageBuilder {
     ranged(projectile, distanceReference);
   }
 
-  void squash(FallingBlockInfo fallingBlock) throws NoMessage {
+  void squash(PhysicalInfo fallingBlock) throws NoMessage {
     require("squash");
     attack(null, fallingBlock);
+  }
+
+  void suffocate(PhysicalInfo fallenBlock) throws NoMessage {
+    require("suffocate");
+    attack(null, fallenBlock);
+  }
+
+  void cactus(PhysicalInfo fallenBlock) throws NoMessage {
+    require("cactus");
+    attack(null, fallenBlock);
   }
 
   void explosion(ExplosionInfo explosion, Location distanceReference) throws NoMessage {
@@ -391,7 +399,7 @@ public class DeathMessageBuilder {
         player();
       }
     } else if (cause instanceof DamageInfo) {
-      damage((DamageInfo) cause);
+      damage((DamageInfo) cause, fall.getOrigin());
     } else if (fall.getTo() == FallInfo.To.GROUND) {
       setDistance(Trackers.distanceFromRanged(fall, victim.getBukkit().getLocation()));
 
@@ -413,19 +421,28 @@ public class DeathMessageBuilder {
     }
   }
 
-  void damage(DamageInfo info) throws NoMessage {
+  void damage(DamageInfo info, Location location) throws NoMessage {
     if (info instanceof MeleeInfo) {
       melee((MeleeInfo) info);
     } else if (info instanceof ProjectileInfo) {
-      projectile((ProjectileInfo) info, victim.getBukkit().getLocation());
+      projectile((ProjectileInfo) info, location);
     } else if (info instanceof ExplosionInfo) {
-      explosion((ExplosionInfo) info, victim.getBukkit().getLocation());
+      explosion((ExplosionInfo) info, location);
     } else if (info instanceof FireInfo) {
       fire((FireInfo) info);
     } else if (info instanceof PotionInfo) {
       magic((PotionInfo) info, null);
     } else if (info instanceof FallingBlockInfo) {
       squash((FallingBlockInfo) info);
+    } else if (info instanceof BlockInfo) {
+      final Material material = ((BlockInfo) info).getMaterial().getItemType();
+      if (material == Material.ANVIL) {
+        squash((BlockInfo) info);
+      } else if (material == Material.CACTUS) {
+        cactus((BlockInfo) info);
+      } else {
+        suffocate((BlockInfo) info);
+      }
     } else if (info instanceof FallInfo) {
       fall((FallInfo) info);
     } else if (info instanceof GenericDamageInfo) {
@@ -440,7 +457,7 @@ public class DeathMessageBuilder {
 
     try {
       key = "death";
-      damage(damageInfo);
+      damage(damageInfo, victim.getBukkit().getLocation());
       variant();
       finish();
     } catch (NoMessage ex) {

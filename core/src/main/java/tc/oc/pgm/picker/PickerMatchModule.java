@@ -1,6 +1,10 @@
 package tc.oc.pgm.picker;
 
-import static com.google.common.base.Preconditions.checkState;
+import static net.kyori.adventure.key.Key.key;
+import static net.kyori.adventure.sound.Sound.sound;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+import static tc.oc.pgm.util.Assert.assertTrue;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -11,7 +15,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import javax.annotation.Nullable;
+import net.kyori.adventure.sound.Sound;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
@@ -22,12 +27,12 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.player.PlayerLocaleChangeEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.LeatherArmorMeta;
 import org.bukkit.material.MaterialData;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.match.Match;
@@ -39,25 +44,26 @@ import tc.oc.pgm.api.match.factory.MatchModuleFactory;
 import tc.oc.pgm.api.module.exception.ModuleLoadException;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.event.ObserverInteractEvent;
+import tc.oc.pgm.api.player.event.PlayerVanishEvent;
 import tc.oc.pgm.api.setting.SettingKey;
 import tc.oc.pgm.blitz.BlitzMatchModule;
 import tc.oc.pgm.classes.ClassMatchModule;
 import tc.oc.pgm.classes.PlayerClass;
-import tc.oc.pgm.community.events.PlayerVanishEvent;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.PlayerJoinMatchEvent;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
-import tc.oc.pgm.join.GenericJoinResult;
 import tc.oc.pgm.join.JoinMatchModule;
+import tc.oc.pgm.join.JoinRequest;
 import tc.oc.pgm.join.JoinResult;
-import tc.oc.pgm.match.Observers;
+import tc.oc.pgm.join.JoinResultOption;
+import tc.oc.pgm.match.ObserverParty;
 import tc.oc.pgm.spawns.events.DeathKitApplyEvent;
 import tc.oc.pgm.spawns.events.ObserverKitApplyEvent;
 import tc.oc.pgm.teams.Team;
 import tc.oc.pgm.teams.TeamMatchModule;
 import tc.oc.pgm.util.LegacyFormatUtils;
 import tc.oc.pgm.util.StringUtils;
-import tc.oc.pgm.util.chat.Sound;
+import tc.oc.pgm.util.event.player.PlayerLocaleChangeEvent;
 import tc.oc.pgm.util.inventory.InventoryUtils;
 import tc.oc.pgm.util.text.TextTranslations;
 
@@ -108,9 +114,9 @@ public class PickerMatchModule implements MatchModule, Listener {
 
   private final Match match;
   private final Set<MatchPlayer> picking = new HashSet<>();
-  private boolean hasTeams;
-  private boolean hasClasses;
-  private boolean isBlitz;
+  private final boolean hasTeams;
+  private final boolean hasClasses;
+  private final boolean isBlitz;
 
   private PickerMatchModule(Match match) {
     this.match = match;
@@ -126,8 +132,10 @@ public class PickerMatchModule implements MatchModule, Listener {
         return false;
       case PICKER_ON: // When on always show the GUI
         return true;
+      case PICKER_MANUAL: // Only show the GUI when right clicked
+        return playerTriggered;
       default: // Display after map cycle, but check perms when clicking button.
-        return (playerTriggered ? (hasPermission || hasClasses) : true);
+        return !playerTriggered || hasPermission || hasClasses;
     }
   }
 
@@ -137,10 +145,11 @@ public class PickerMatchModule implements MatchModule, Listener {
   }
 
   private boolean canAutoJoin(MatchPlayer joining) {
-    JoinResult result = match.needModule(JoinMatchModule.class).queryJoin(joining, null);
-    return result.isSuccess()
-        || ((result instanceof GenericJoinResult)
-            && ((GenericJoinResult) result).getStatus() == GenericJoinResult.Status.FULL);
+    JoinResult result =
+        match
+            .needModule(JoinMatchModule.class)
+            .queryJoin(joining, JoinRequest.fromPlayer(joining, null));
+    return result.isSuccess() || result.getOption() == JoinResultOption.FULL;
   }
 
   private boolean canChooseMultipleTeams(MatchPlayer joining) {
@@ -153,15 +162,12 @@ public class PickerMatchModule implements MatchModule, Listener {
 
     Set<Team> teams = new HashSet<>();
     for (Team team : tmm.getTeams()) {
-      JoinResult result = tmm.queryJoin(joining, team);
+      JoinResult result = tmm.queryJoin(joining, JoinRequest.fromPlayer(joining, team));
       // We still want to show the button if the team is full
       // or the player doesn't have join perms.
       if (result.isSuccess()
-          || result instanceof GenericJoinResult
-              && (((GenericJoinResult) result).getStatus() == GenericJoinResult.Status.FULL
-                  || ((GenericJoinResult) result).getStatus()
-                      == GenericJoinResult.Status.CHOICE_DENIED)) {
-
+          || result.getOption() == JoinResultOption.FULL
+          || result.getOption() == JoinResultOption.CHOICE_DENIED) {
         teams.add(team);
       }
     }
@@ -174,7 +180,7 @@ public class PickerMatchModule implements MatchModule, Listener {
     if (player == null) return false;
 
     // Player is eliminated from Blitz
-    if (isBlitz && match.isRunning()) return false;
+    if (isBlitz && !match.needModule(BlitzMatchModule.class).canJoin(player, null)) return false;
 
     // Player is not observing or dead
     if (!(player.isObserving() || player.isDead())) return false;
@@ -201,7 +207,7 @@ public class PickerMatchModule implements MatchModule, Listener {
   }
 
   private String getWindowTitle(MatchPlayer player) {
-    checkState(hasTeams || hasClasses); // Window should not open if there is nothing to pick
+    assertTrue(hasTeams || hasClasses); // Window should not open if there is nothing to pick
 
     String key;
     if (hasTeams && hasClasses) {
@@ -240,7 +246,9 @@ public class PickerMatchModule implements MatchModule, Listener {
                 + TextTranslations.translate("picker.tooltip", player.getBukkit())));
 
     // Color the leather helmet to match player team
-    if (player != null && player.getParty() != null && !(player.getParty() instanceof Observers)) {
+    if (player != null
+        && player.getParty() != null
+        && !(player.getParty() instanceof ObserverParty)) {
       LeatherArmorMeta armorMeta = (LeatherArmorMeta) meta;
       armorMeta.setColor(player.getParty().getFullColor());
       meta = armorMeta;
@@ -342,7 +350,7 @@ public class PickerMatchModule implements MatchModule, Listener {
     this.picking.remove(match.getPlayer((Player) event.getPlayer()));
   }
 
-  @EventHandler(priority = EventPriority.HIGHEST)
+  @EventHandler
   public void rightClickIcon(final ObserverInteractEvent event) {
     final boolean right = event.getClickType() == ClickType.RIGHT;
     final boolean left = event.getClickType() == ClickType.LEFT;
@@ -364,10 +372,10 @@ public class PickerMatchModule implements MatchModule, Listener {
         showWindow(player);
       } else {
         // If there is nothing to pick or setting is disabled, just join immediately
-        jmm.join(player, null);
+        jmm.join(player, JoinRequest.fromPlayer(player, null));
       }
     } else if (hand.getType() == Button.LEAVE.material && left) {
-      jmm.leave(player);
+      jmm.leave(player, JoinRequest.empty());
     }
 
     if (handled) {
@@ -624,9 +632,9 @@ public class PickerMatchModule implements MatchModule, Listener {
         this.getTeamSizeDescription(team.getPlayers().size(), team.getMaxPlayers());
     List<String> lore = Lists.newArrayList(capacityMessage);
 
-    JoinResult result = jmm.queryJoin(player, team);
-    if (result instanceof GenericJoinResult) {
-      switch (((GenericJoinResult) result).getStatus()) {
+    JoinResult result = jmm.queryJoin(player, JoinRequest.fromPlayer(player, team));
+    if (result instanceof JoinResultOption) {
+      switch ((JoinResultOption) result) {
         default:
           lore.add(
               ChatColor.GREEN
@@ -673,7 +681,7 @@ public class PickerMatchModule implements MatchModule, Listener {
 
   private void handleInventoryClick(
       final MatchPlayer player, final String name, final MaterialData material) {
-    player.playSound(new Sound("random.click", 1, 2));
+    player.playSound(sound(key("random.click"), Sound.Source.MASTER, 1, 2));
 
     if (hasClasses) {
       ClassMatchModule cmm = player.getMatch().needModule(ClassMatchModule.class);
@@ -686,14 +694,11 @@ public class PickerMatchModule implements MatchModule, Listener {
           if (cmm.getCanChangeClass(player.getId())) {
             cmm.setPlayerClass(player.getId(), cls);
             player.sendMessage(
-                ChatColor.GOLD
-                    + TextTranslations.translate(
-                        "match.class.ok", player.getBukkit(), ChatColor.GREEN + name));
+                translatable(
+                    "match.class.ok", NamedTextColor.GOLD, text(name, NamedTextColor.GREEN)));
             scheduleRefresh(player);
           } else {
-            player.sendMessage(
-                ChatColor.RED
-                    + TextTranslations.translate("match.class.sticky", player.getBukkit()));
+            player.sendMessage(translatable("match.class.sticky", NamedTextColor.RED));
           }
         }
 
@@ -707,7 +712,7 @@ public class PickerMatchModule implements MatchModule, Listener {
     }
 
     if (hasTeams && Button.TEAM_JOIN.matches(material)) {
-      Team team = player.getMatch().needModule(TeamMatchModule.class).bestFuzzyMatch(name, 1);
+      Team team = player.getMatch().needModule(TeamMatchModule.class).getTeam(name);
       if (team != null) {
         this.scheduleClose(player);
         this.scheduleJoin(player, team);
@@ -760,7 +765,7 @@ public class PickerMatchModule implements MatchModule, Listener {
         .execute(
             () -> {
               if (bukkit.isOnline()) {
-                match.needModule(JoinMatchModule.class).leave(player);
+                match.needModule(JoinMatchModule.class).leave(player, JoinRequest.empty());
               }
             });
   }

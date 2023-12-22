@@ -8,7 +8,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.annotation.Nullable;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
@@ -20,6 +19,7 @@ import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.Potion;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.jetbrains.annotations.Nullable;
 
 public final class InventoryUtils {
   private InventoryUtils() {}
@@ -81,12 +81,11 @@ public final class InventoryUtils {
       PotionMeta meta = (PotionMeta) potion.getItemMeta();
       if (meta.hasCustomEffects()) {
         return meta.getCustomEffects();
-      } else {
+      } else if (potion.getType() == Material.POTION) { // Sanity check, SpawnablePotionBukkit
         return Potion.fromItemStack(potion).getEffects();
       }
-    } else {
-      return Collections.emptyList();
     }
+    return Collections.emptyList();
   }
 
   public static @Nullable PotionEffectType getPrimaryEffectType(ItemStack potion) {
@@ -149,5 +148,14 @@ public final class InventoryUtils {
     // or if the server does not support for this patch.
     // TODO: Newer versions of Bukkit can use HumanEntity#openMerchant(Merchant, boolean)
     viewer.openMerchantCopy(villager);
+  }
+
+  public static void consumeItem(Player player) {
+    ItemStack itemInHand = player.getItemInHand();
+    if (itemInHand.getAmount() > 1) {
+      itemInHand.setAmount(itemInHand.getAmount() - 1);
+    } else {
+      player.setItemInHand(null);
+    }
   }
 }

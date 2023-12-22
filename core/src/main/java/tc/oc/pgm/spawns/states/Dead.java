@@ -1,38 +1,42 @@
 package tc.oc.pgm.spawns.states;
 
+import static net.kyori.adventure.text.Component.translatable;
+import static tc.oc.pgm.util.player.PlayerComponent.player;
+
 import java.util.List;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.event.Event;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.events.PlayerJoinPartyEvent;
-import tc.oc.pgm.spawns.Spawn;
 import tc.oc.pgm.spawns.SpawnMatchModule;
 import tc.oc.pgm.spawns.SpawnModule;
 import tc.oc.pgm.spawns.events.DeathKitApplyEvent;
 import tc.oc.pgm.util.TimeUtils;
+import tc.oc.pgm.util.named.NameStyle;
 import tc.oc.pgm.util.nms.NMSHacks;
 
 /** Player is waiting to respawn after dying in-game */
 public class Dead extends Spawning {
-  private static final long CORPSE_ROT_TICKS = 15;
+  private static final long CORPSE_ROT_TICKS = 20;
 
-  private final long deathTick;
+  private static final PotionEffect CONFUSION =
+      new PotionEffect(PotionEffectType.CONFUSION, 100, 0, true, false);
+  private static final PotionEffect BLINDNESS_SHORT =
+      new PotionEffect(PotionEffectType.BLINDNESS, 21, 0, true, false);
+  private static final PotionEffect BLINDNESS_LONG =
+      new PotionEffect(PotionEffectType.BLINDNESS, Integer.MAX_VALUE, 0, true, false);
+
   private boolean kitted, rotted;
 
   public Dead(SpawnMatchModule smm, MatchPlayer player) {
-    this(smm, player, player.getMatch().getTick().tick);
-  }
-
-  public Dead(SpawnMatchModule smm, MatchPlayer player, long deathTick) {
-    super(smm, player);
-    this.deathTick = deathTick;
+    super(smm, player, player.getMatch().getTick().tick);
   }
 
   @Override
@@ -47,40 +51,61 @@ public class Dead extends Spawning {
 
     // Show red vignette
     NMSHacks.showBorderWarning(player.getBukkit(), true);
+
+    // Flash/wobble the screen. If we don't delay this then the client glitches out
+    // when the player dies from a potion effect. I have no idea why it happens,
+    // but this fixes it. We could investigate a better fix at some point.
+    smm.getMatch()
+        .getExecutor(MatchScope.LOADED)
+        .execute(
+            () -> {
+              if (isCurrent() && bukkit.isOnline()) {
+                bukkit.addPotionEffect(options.blackout ? BLINDNESS_LONG : BLINDNESS_SHORT, true);
+                bukkit.addPotionEffect(CONFUSION, true);
+              }
+            });
   }
 
   @Override
   public void leaveState(List<Event> events) {
     player.setFrozen(false);
     player.setDead(false);
+
     NMSHacks.showBorderWarning(bukkit, false);
 
-    super.leaveState(events);
-  }
+    bukkit.removePotionEffect(PotionEffectType.BLINDNESS);
+    bukkit.removePotionEffect(PotionEffectType.CONFUSION);
 
-  protected long age() {
-    return player.getMatch().getTick().tick - deathTick;
+    // If regular rotting didn't end, force-finish it to avoid client-side
+    endRotting();
+
+    super.leaveState(events);
   }
 
   @Override
   public void tick() {
     long age = age();
 
-    if (!kitted && ticksUntilRespawn() <= 0) {
+    if (!kitted
+        && ticksUntilRespawn() <= 0
+        && age >= TimeUtils.toTicks(SpawnModule.MIN_KIT_DELAY)) {
       this.kitted = true;
       // Give the player the team/class picker, after death has cleared their inventory
       player.getMatch().callEvent(new DeathKitApplyEvent(player));
       bukkit.updateInventory();
     }
 
-    if (!rotted && age >= CORPSE_ROT_TICKS) {
-      this.rotted = true;
-      // Make player invisible after the death animation is complete
-      player.setVisible(false);
-      player.resetGamemode();
-    }
+    // Make player invisible after the death animation is complete
+    if (age >= CORPSE_ROT_TICKS) endRotting();
 
     super.tick(); // May transition to a different state, so call last
+  }
+
+  private void endRotting() {
+    if (this.rotted) return;
+    this.rotted = true;
+    player.setVisible(false);
+    player.resetVisibility();
   }
 
   @Override
@@ -91,41 +116,18 @@ public class Dead extends Spawning {
     }
   }
 
-  protected long ticksUntilRespawn() {
-    return Math.max(0, options.delayTicks - age());
-  }
-
-  @Override
-  public @Nullable Spawn chooseSpawn() {
-    if (ticksUntilRespawn() > 0) {
-      return null;
-    } else {
-      return super.chooseSpawn();
-    }
-  }
-
   public void requestSpawn() {
-    if (player.getMatch().getTick().tick - deathTick
-        >= TimeUtils.toTicks(SpawnModule.IGNORE_CLICKS_DELAY)) {
+    if (age() >= TimeUtils.toTicks(SpawnModule.IGNORE_CLICKS_DELAY)) {
       super.requestSpawn();
     }
   }
 
   @Override
-  protected Component getTitle() {
-    return TranslatableComponent.of("deathScreen.title", TextColor.RED);
-  }
-
-  @Override
-  protected Component getSubtitle() {
-    long ticks = ticksUntilRespawn();
-    if (ticks > 0) {
-      return TranslatableComponent.of(
-          spawnRequested ? "death.respawn.confirmed.time" : "death.respawn.unconfirmed.time",
-          TextComponent.of(String.format("%.1f", (ticks / (float) 20)), TextColor.AQUA));
-    } else {
-      return super.getSubtitle();
-    }
+  protected Component getTitle(boolean spectator) {
+    return translatable(
+        "deathScreen.title" + (spectator ? ".spectator" : ""),
+        NamedTextColor.RED,
+        player(player, NameStyle.SIMPLE_COLOR));
   }
 
   @Override
@@ -138,21 +140,5 @@ public class Dead extends Spawning {
   public void onEvent(EntityDamageEvent event) {
     super.onEvent(event);
     event.setCancelled(true);
-  }
-
-  @Override
-  public void sendMessage() {
-    long ticks = options.delayTicks - age();
-    if (ticks % (ticks > 0 ? 20 : 100) == 0) {
-      player.sendMessage(
-          (ticks > 0
-                  ? TranslatableComponent.of(
-                      spawnRequested
-                          ? "death.respawn.confirmed.time"
-                          : "death.respawn.unconfirmed.time",
-                      TextComponent.of((int) (ticks / (float) 20), TextColor.AQUA))
-                  : super.getSubtitle())
-              .color(TextColor.GREEN));
-    }
   }
 }

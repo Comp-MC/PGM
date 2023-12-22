@@ -1,9 +1,13 @@
 package tc.oc.pgm.flag.state;
 
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+
 import java.time.Duration;
 import java.time.Instant;
-import net.kyori.text.TranslatableComponent;
-import org.bukkit.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Location;
 import tc.oc.pgm.api.party.Party;
 import tc.oc.pgm.api.player.MatchPlayer;
@@ -29,6 +33,10 @@ public class Dropped extends Uncarried implements Missing {
     this.dropper = dropper;
   }
 
+  public MatchPlayer getDropper() {
+    return dropper;
+  }
+
   @Override
   protected Duration getDuration() {
     return this.post.getRecoverTime();
@@ -40,9 +48,7 @@ public class Dropped extends Uncarried implements Missing {
 
     if (!Duration.ZERO.equals(getDuration())) {
       this.flag.playStatusSound(Flag.DROP_SOUND_OWN, Flag.DROP_SOUND);
-      this.flag
-          .getMatch()
-          .sendMessage(TranslatableComponent.of("flag.drop", this.flag.getComponentName()));
+      this.flag.getMatch().sendMessage(translatable("flag.drop", this.flag.getComponentName()));
     }
 
     if (TimeUtils.isInfinite(getDuration())) {
@@ -62,7 +68,8 @@ public class Dropped extends Uncarried implements Missing {
   protected void tickSeconds(long seconds) {
     super.tickSeconds(seconds);
     this.flag.getMatch().callEvent(new GoalStatusChangeEvent(this.flag.getMatch(), this.flag));
-    this.labelEntity.setCustomName(this.flag.getColoredName() + " " + ChatColor.AQUA + seconds);
+    this.hologram.setText(
+        this.flag.getComponentName().appendSpace().append(text(seconds, NamedTextColor.AQUA)));
   }
 
   @Override
@@ -83,18 +90,18 @@ public class Dropped extends Uncarried implements Missing {
   }
 
   @Override
-  public ChatColor getStatusColor(Party viewer) {
+  public TextColor getStatusColor(Party viewer) {
     if (this.isCountingDown()) {
-      return ChatColor.AQUA;
+      return NamedTextColor.AQUA;
     } else if (this.flag.getDefinition().hasMultipleCarriers()) {
-      return ChatColor.WHITE;
+      return NamedTextColor.WHITE;
     } else {
       return super.getStatusColor(viewer);
     }
   }
 
   @Override
-  public String getStatusSymbol(Party viewer) {
+  public Component getStatusSymbol(Party viewer) {
     return Flag.DROPPED_SYMBOL;
   }
 }

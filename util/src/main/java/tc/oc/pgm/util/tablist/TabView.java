@@ -3,12 +3,13 @@ package tc.oc.pgm.util.tablist;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import javax.annotation.Nullable;
-import net.md_5.bungee.api.chat.BaseComponent;
+import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.util.bukkit.ViaUtils;
+import tc.oc.pgm.util.text.TextTranslations;
 
 /**
  * A single player's tab list. When this view is enabled, it creates a scoreboard team for each slot
@@ -29,9 +30,9 @@ public class TabView {
   protected @Nullable TabManager manager;
 
   // True when any slots/header/footer have been changed but not rendered
-  private boolean dirtyLayout, dirtyContent, dirtyHeader, dirtyFooter;
+  protected final TabViewDirtyTracker dirtyTracker;
   private final TabEntry[] slots, rendered;
-  private BaseComponent[] header, footer;
+  private Component header, footer;
 
   // Only used for legacy players, initialized on enable
   protected @Nullable TabDisplay display = null;
@@ -41,6 +42,8 @@ public class TabView {
     this.size = WIDTH * HEIGHT;
     this.headerSlot = this.size;
     this.footerSlot = this.headerSlot + 1;
+
+    this.dirtyTracker = new TabViewDirtyTracker();
 
     // Two extra slots for header/footer
     this.slots = new TabEntry[this.size + 2];
@@ -68,20 +71,20 @@ public class TabView {
     return this.size;
   }
 
+  public TabViewDirtyTracker getDirtyTracker() {
+    return dirtyTracker;
+  }
+
   /** Take control of the viewer's player list */
   public void enable(TabManager manager) {
     if (this.manager != null) disable();
     this.manager = manager;
 
-    if (ViaUtils.getProtocolVersion(viewer) < ViaUtils.VERSION_1_8)
+    if (ViaUtils.getProtocolVersion(viewer) <= ViaUtils.VERSION_1_7)
       this.display = new TabDisplay(viewer, WIDTH);
 
     this.setup();
-
-    this.invalidateLayout();
-    this.invalidateContent();
-    this.invalidateHeader();
-    this.invalidateFooter();
+    this.dirtyTracker.enable(manager.getDirty());
   }
 
   /** Tear down the display and return control the the viewer's player list to settings */
@@ -93,54 +96,11 @@ public class TabView {
     }
   }
 
-  private void invalidateManager() {
-    if (this.manager != null) this.manager.invalidate();
-  }
-
-  protected void invalidateLayout() {
-    if (!this.dirtyLayout) {
-      this.dirtyLayout = true;
-      this.invalidateManager();
-    }
-  }
-
-  protected void invalidateContent() {
-    if (!this.dirtyContent) {
-      this.dirtyContent = true;
-      this.invalidateManager();
-    }
-  }
-
-  protected void invalidateLayoutAndContent() {
-    if (!dirtyLayout || !dirtyContent) {
-      dirtyLayout = dirtyContent = true;
-      invalidateManager();
-    }
-  }
-
   protected void invalidateContent(TabEntry entry) {
     int slot = getSlot(entry);
-    if (slot == this.headerSlot) this.invalidateHeader();
-    else if (slot == this.footerSlot) this.invalidateFooter();
-    else if (slot >= 0) this.invalidateContent();
-  }
-
-  protected void invalidateHeader() {
-    if (!this.dirtyHeader) {
-      this.dirtyHeader = true;
-      this.invalidateManager();
-    }
-  }
-
-  protected void invalidateFooter() {
-    if (!this.dirtyFooter) {
-      this.dirtyFooter = true;
-      this.invalidateManager();
-    }
-  }
-
-  protected boolean isLayoutDirty() {
-    return this.dirtyLayout;
+    if (slot == this.headerSlot) dirtyTracker.invalidateHeader();
+    else if (slot == this.footerSlot) dirtyTracker.invalidateFooter();
+    else if (slot >= 0) dirtyTracker.invalidateContent();
   }
 
   protected int getSlot(TabEntry entry) {
@@ -174,11 +134,11 @@ public class TabView {
       this.slots[slot] = entry;
 
       if (slot < this.size) {
-        this.invalidateLayoutAndContent();
+        dirtyTracker.invalidateLayoutAndContent();
       } else if (slot == this.headerSlot) {
-        this.invalidateHeader();
+        dirtyTracker.invalidateHeader();
       } else if (slot == this.footerSlot) {
-        this.invalidateFooter();
+        dirtyTracker.invalidateFooter();
       }
     }
   }
@@ -213,13 +173,15 @@ public class TabView {
     this.markSlotsClean();
     this.renderHeaderFooter(render, false);
     render.finish();
+    dirtyTracker.validatePriority();
   }
 
   private void renderLegacy() {
     if (this.manager == null || display == null) return;
 
-    if (this.dirtyLayout || this.dirtyContent) {
-      this.dirtyLayout = this.dirtyContent = false;
+    if (dirtyTracker.isLayout() || dirtyTracker.isContent()) {
+      dirtyTracker.validateLayout();
+      dirtyTracker.validateContent();
 
       // X & Y are transposed in legacy versions, gotta convert
       for (int x = 0; x < WIDTH; x++) {
@@ -229,19 +191,12 @@ public class TabView {
           if (this.slots[i] == this.rendered[i] && !this.slots[i].isDirty(this)) continue;
           this.rendered[i] = this.slots[i];
 
-          this.display.set(x, y, toPlain(this.rendered[i].getContent(this)));
+          this.display.set(
+              x, y, TextTranslations.translateLegacy(this.rendered[i].getContent(this), viewer));
         }
       }
     }
     this.markSlotsClean();
-  }
-
-  private String toPlain(BaseComponent[] components) {
-    StringBuilder bl = new StringBuilder();
-    for (BaseComponent component : components) {
-      bl.append(component.toLegacyText());
-    }
-    return bl.toString();
   }
 
   public void renderPing() {
@@ -261,8 +216,8 @@ public class TabView {
   public void renderLayout(TabRender render) {
     if (this.manager == null || this.display != null) return;
 
-    if (this.dirtyLayout) {
-      this.dirtyLayout = false;
+    if (dirtyTracker.isLayout()) {
+      dirtyTracker.validateLayout();
 
       // First search for entries that have been added, removed, or moved
       Map<TabEntry, Integer> removals = new HashMap<>();
@@ -310,8 +265,8 @@ public class TabView {
   public void renderContent(TabRender render) {
     if (this.manager == null || this.display != null) return;
 
-    if (this.dirtyContent) {
-      this.dirtyContent = false;
+    if (dirtyTracker.isContent()) {
+      dirtyTracker.validateContent();
 
       // Build the update packet from entries with new content that are not being added or removed
       for (int i = 0; i < this.size; i++) {
@@ -328,16 +283,22 @@ public class TabView {
     }
   }
 
+  public void renderHeaderFooter() {
+    TabRender render = new TabRender(this);
+    renderHeaderFooter(render, false);
+    render.finish();
+  }
+
   public void renderHeaderFooter(TabRender render, boolean force) {
     if (this.manager == null || this.display != null) return;
 
-    if (force || this.dirtyHeader || this.dirtyFooter) {
-      if (force || this.dirtyHeader) {
-        this.dirtyHeader = false;
+    if (force || dirtyTracker.isHeaderOrFooter()) {
+      if (force || dirtyTracker.isHeader()) {
+        dirtyTracker.validateHeader();
         header = (this.rendered[this.headerSlot] = this.slots[this.headerSlot]).getContent(this);
       }
-      if (force || this.dirtyFooter) {
-        this.dirtyFooter = false;
+      if (force || dirtyTracker.isFooter()) {
+        dirtyTracker.validateFooter();
         footer = (this.rendered[this.footerSlot] = this.slots[this.footerSlot]).getContent(this);
       }
 

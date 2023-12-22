@@ -1,11 +1,9 @@
 package tc.oc.pgm.util.bukkit;
 
+import com.viaversion.viaversion.api.Via;
+import java.lang.reflect.Field;
+import java.util.List;
 import org.bukkit.entity.Player;
-import tc.oc.pgm.util.nms.NMSHacks;
-import us.myles.ViaVersion.api.Via;
-import us.myles.ViaVersion.api.boss.BossBar;
-import us.myles.ViaVersion.api.boss.BossColor;
-import us.myles.ViaVersion.api.boss.BossStyle;
 
 public class ViaUtils {
   /** Minecraft 1.7.6 &ndash; 1.7.10 */
@@ -15,15 +13,15 @@ public class ViaUtils {
   /** Minecraft 1.9 &ndash; 1.9.1-pre1 */
   public static final int VERSION_1_9 = 107;
 
-  private static final boolean ENABLED;
+  private static final boolean ENABLED = isViaLoaded();
 
-  static {
-    boolean viaLoaded = false;
+  private static boolean isViaLoaded() {
     try {
-      viaLoaded = Class.forName("us.myles.ViaVersion.api.Via") != null;
+      Class.forName("com.viaversion.viaversion.api.Via");
+      return true;
     } catch (ClassNotFoundException ignored) {
+      return false;
     }
-    ENABLED = viaLoaded;
   }
 
   public static boolean enabled() {
@@ -38,7 +36,7 @@ public class ViaUtils {
     if (enabled()) {
       return Via.getAPI().getPlayerVersion(player.getUniqueId());
     } else {
-      return NMSHacks.getProtocolVersion(player);
+      return VERSION_1_8;
     }
   }
 
@@ -46,7 +44,21 @@ public class ViaUtils {
     return !enabled() || Via.getAPI().isInjected(player.getUniqueId());
   }
 
-  public static BossBar<?> createBossBar() {
-    return enabled() ? Via.getAPI().createBossBar("", BossColor.BLUE, BossStyle.SOLID) : null;
+  /**
+   * Adventure has a ViaFacet$Chat class, which sends text using 1.16 format for support for hex
+   * codes. The issue is by doing that, it skips all translation layers from 1.8 to 1.16, including
+   * a needed rename for translated items to work. Removing this means hex colors would be
+   * restricted to the 16 colors even for 1.16 clients (pgm doesn't use them) but translations will
+   * be correct.
+   */
+  public static void removeViaChatFacet() {
+    try {
+      Class<?> bukkitAudience = Class.forName("net.kyori.adventure.platform.bukkit.BukkitAudience");
+      Field f = bukkitAudience.getDeclaredField("CHAT");
+      f.setAccessible(true);
+      List<?> list = (List<?>) f.get(null);
+      list.removeIf(el -> el.getClass().getName().endsWith("ViaFacet$Chat"));
+    } catch (ReflectiveOperationException ignored) {
+    }
   }
 }

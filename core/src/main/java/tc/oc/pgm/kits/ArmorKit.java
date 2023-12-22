@@ -5,6 +5,7 @@ import java.util.Map;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import tc.oc.pgm.api.player.MatchPlayer;
+import tc.oc.pgm.kits.tag.ItemModifier;
 
 public class ArmorKit extends AbstractKit {
   public static class ArmorItem {
@@ -38,11 +39,7 @@ public class ArmorKit extends AbstractKit {
       int slot = entry.getKey().ordinal();
       if (force || wearing[slot] == null || wearing[slot].getType() == Material.AIR) {
         wearing[slot] = entry.getValue().stack.clone();
-
-        KitMatchModule kitMatchModule = player.getMatch().getModule(KitMatchModule.class);
-        if (kitMatchModule != null) {
-          kitMatchModule.lockArmorSlot(player, entry.getKey(), entry.getValue().locked);
-        }
+        ItemModifier.apply(wearing[slot], player);
       }
     }
     player.getBukkit().getInventory().setArmorContents(wearing);

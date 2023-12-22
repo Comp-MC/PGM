@@ -4,56 +4,62 @@ import java.util.AbstractMap;
 import java.util.Map;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.event.CompetitorScoreChangeEvent;
+import tc.oc.pgm.util.Pair;
 
 public class MercyRule {
 
   private final ScoreMatchModule scoreMatchModule;
   private final int scoreLimit;
   private final int mercyLimit;
+  private final int mercyLimitMin;
 
-  private Map.Entry<Competitor, Double> leader;
-  private Map.Entry<Competitor, Double> trailer;
+  private Pair<Competitor, Double> leader;
+  private Pair<Competitor, Double> trailer;
 
-  public MercyRule(ScoreMatchModule scoreMatchModule, int scoreLimit, int mercyLimit) {
+  public MercyRule(
+      ScoreMatchModule scoreMatchModule, int scoreLimit, int mercyLimit, int mercyLimitMin) {
     this.scoreMatchModule = scoreMatchModule;
     this.scoreLimit = scoreLimit;
     this.mercyLimit = mercyLimit;
+    this.mercyLimitMin = mercyLimitMin;
 
     calculateLeaders();
   }
 
   private double getLeaderScore() {
-    return leader.getValue();
+    return leader.getRight();
   }
 
   private double getTrailerScore() {
-    return trailer.getValue();
+    return trailer.getRight();
   }
 
   private void setLeader(Competitor competitor, Double score) {
-    leader = new AbstractMap.SimpleEntry<>(competitor, score);
+    leader = Pair.of(competitor, score);
   }
 
   private void setTrailer(Competitor competitor, Double score) {
-    trailer = new AbstractMap.SimpleEntry<>(competitor, score);
+    trailer = Pair.of(competitor, score);
   }
 
   private boolean isLeader(Competitor competitor) {
-    return competitor.equals(leader.getKey());
+    return competitor.equals(leader.getLeft());
   }
 
   private boolean isTrailer(Competitor competitor) {
-    return competitor.equals(trailer.getKey());
+    return competitor.equals(trailer.getLeft());
   }
 
   public int getScoreLimit() {
     int scoreBaseline = (int) getTrailerScore();
 
+    int mercyBaseline = Math.max(scoreBaseline + mercyLimit, mercyLimitMin);
+
     if (scoreLimit < 0) {
-      return scoreBaseline + mercyLimit;
+      return mercyBaseline;
     }
 
-    return Math.min(scoreBaseline + mercyLimit, scoreLimit);
+    return Math.min(mercyBaseline, scoreLimit);
   }
 
   public void handleEvent(CompetitorScoreChangeEvent event) {
@@ -78,7 +84,7 @@ public class MercyRule {
     if (event.getOldScore() > event.getNewScore()) {
       if (isLeader(event.getCompetitor())
           || isTrailer(event.getCompetitor())
-          || trailer.getKey() == null) {
+          || trailer.getLeft() == null) {
         calculateLeaders();
       }
     }

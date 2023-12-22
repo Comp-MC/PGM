@@ -1,25 +1,42 @@
 package tc.oc.pgm.map;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+import static tc.oc.pgm.api.map.MapSource.DEFAULT_VARIANT;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.Iterables;
+import java.lang.ref.SoftReference;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
-import net.kyori.text.format.TextDecoration;
-import org.apache.commons.lang3.builder.ToStringBuilder;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Difficulty;
 import org.jdom2.Element;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.map.Contributor;
+import tc.oc.pgm.api.map.Gamemode;
+import tc.oc.pgm.api.map.MapContext;
 import tc.oc.pgm.api.map.MapInfo;
+import tc.oc.pgm.api.map.MapModule;
+import tc.oc.pgm.api.map.MapSource;
 import tc.oc.pgm.api.map.MapTag;
+import tc.oc.pgm.api.map.Phase;
 import tc.oc.pgm.api.map.WorldInfo;
+import tc.oc.pgm.ffa.FreeForAllModule;
 import tc.oc.pgm.map.contrib.PlayerContributor;
 import tc.oc.pgm.map.contrib.PseudonymContributor;
+import tc.oc.pgm.teams.TeamFactory;
+import tc.oc.pgm.teams.TeamModule;
+import tc.oc.pgm.util.StreamUtils;
+import tc.oc.pgm.util.StringUtils;
 import tc.oc.pgm.util.Version;
 import tc.oc.pgm.util.named.MapNameStyle;
 import tc.oc.pgm.util.named.NameStyle;
@@ -29,10 +46,21 @@ import tc.oc.pgm.util.xml.Node;
 import tc.oc.pgm.util.xml.XMLUtils;
 
 public class MapInfoImpl implements MapInfo {
+  // See #parseWorld, this class actually is responsible for terrain tag.
+  private static final MapTag TERRAIN = new MapTag("terrain", "Terrain");
+
+  private final MapSource source;
+
   private final String id;
+  private final String variantId;
+  private final Map<String, VariantInfo> variants;
+
+  private final String worldFolder;
   private final Version proto;
   private final Version version;
+  private final Phase phase;
   private final String name;
+  private final String normalizedName;
   private final String description;
   private final LocalDate created;
   private final Collection<Contributor> authors;
@@ -41,85 +69,85 @@ public class MapInfoImpl implements MapInfo {
   private final Component gamemode;
   private final int difficulty;
   private final WorldInfo world;
+  private final boolean friendlyFire;
 
-  protected final Collection<MapTag> tags;
-  protected final Collection<Integer> players;
+  // May be set after loading the whole context
+  protected Collection<Gamemode> gamemodes;
 
-  public MapInfoImpl(
-      @Nullable String id,
-      Version proto,
-      Version version,
-      String name,
-      String description,
-      @Nullable LocalDate created,
-      @Nullable Collection<Contributor> authors,
-      @Nullable Collection<Contributor> contributors,
-      @Nullable Collection<String> rules,
-      @Nullable Integer difficulty,
-      @Nullable Collection<MapTag> tags,
-      @Nullable Collection<Integer> players,
-      @Nullable WorldInfo world,
-      Component gamemode) {
-    this.name = checkNotNull(name);
-    this.id = checkNotNull(MapInfo.normalizeName(id == null ? name : id));
-    this.proto = checkNotNull(proto);
-    this.version = checkNotNull(version);
-    this.description = checkNotNull(description);
-    this.created = created;
-    this.authors = authors == null ? new LinkedList<>() : authors;
-    this.contributors = contributors == null ? new LinkedList<>() : contributors;
-    this.rules = rules == null ? new LinkedList<>() : rules;
-    this.difficulty = difficulty == null ? Difficulty.NORMAL.ordinal() : difficulty;
-    this.tags = tags == null ? new TreeSet<>() : tags;
-    this.players = players == null ? new LinkedList<>() : players;
-    this.world = world == null ? new WorldInfoImpl() : world;
-    this.gamemode = gamemode == null ? TextComponent.empty() : gamemode;
-  }
+  // Must be set after loading the whole context
+  protected Collection<MapTag> tags = ImmutableSortedSet.of();
+  protected Collection<Integer> players = ImmutableList.of();
+  protected SoftReference<MapContext> context = null;
 
-  public MapInfoImpl(MapInfo info) {
-    this(
-        checkNotNull(info).getId(),
-        info.getProto(),
-        info.getVersion(),
-        info.getName(),
-        info.getDescription(),
-        info.getCreated(),
-        info.getAuthors(),
-        info.getContributors(),
-        info.getRules(),
-        info.getDifficulty(),
-        info.getTags(),
-        info.getMaxPlayers(),
-        info.getWorld(),
-        info.getGamemode());
-  }
+  public MapInfoImpl(MapSource source, Element root) throws InvalidXMLException {
+    this.source = source;
+    this.variantId = source.getVariantId();
+    this.variants = createVariantMap(root);
 
-  public MapInfoImpl(Element root) throws InvalidXMLException {
-    this(
-        checkNotNull(root).getChildTextNormalize("slug"),
-        XMLUtils.parseSemanticVersion(Node.fromRequiredAttr(root, "proto")),
-        XMLUtils.parseSemanticVersion(Node.fromRequiredChildOrAttr(root, "version")),
-        Node.fromRequiredChildOrAttr(root, "name").getValueNormalize(),
-        Node.fromRequiredChildOrAttr(root, "objective", "description").getValueNormalize(),
-        XMLUtils.parseDate(Node.fromChildOrAttr(root, "created")),
-        parseContributors(root, "author"),
-        parseContributors(root, "contributor"),
-        parseRules(root),
+    VariantInfo variant = variants.get(variantId);
+    if (variant == null) throw new InvalidXMLException("Could not find variant definition", root);
+
+    this.worldFolder = variant.getWorld();
+
+    this.name = variant.getMapName();
+    this.normalizedName = StringUtils.normalize(name);
+
+    this.id = assertNotNull(variant.getMapId());
+
+    this.proto = assertNotNull(XMLUtils.parseSemanticVersion(Node.fromRequiredAttr(root, "proto")));
+    this.version =
+        assertNotNull(XMLUtils.parseSemanticVersion(Node.fromRequiredChildOrAttr(root, "version")));
+    this.description =
+        assertNotNull(
+            Node.fromRequiredChildOrAttr(root, "objective", "description").getValueNormalize());
+    this.created = XMLUtils.parseDate(Node.fromChildOrAttr(root, "created"));
+    this.authors = parseContributors(root, "author");
+    this.contributors = parseContributors(root, "contributor");
+    this.rules = parseRules(root);
+    this.difficulty =
         XMLUtils.parseEnum(
-                Node.fromLastChildOrAttr(root, "difficulty"),
-                Difficulty.class,
-                "difficulty",
-                Difficulty.NORMAL)
-            .ordinal(),
-        null,
-        null,
-        parseWorld(root),
-        XMLUtils.parseFormattedText(root, "game"));
+                Node.fromLastChildOrAttr(root, "difficulty"), Difficulty.class, Difficulty.NORMAL)
+            .ordinal();
+    this.world = parseWorld(root);
+    this.gamemode = XMLUtils.parseFormattedText(root, "game");
+    this.gamemodes = parseGamemodes(root);
+    this.phase =
+        XMLUtils.parseEnum(Node.fromLastChildOrAttr(root, "phase"), Phase.class, Phase.PRODUCTION);
+    this.friendlyFire =
+        XMLUtils.parseBoolean(
+            Node.fromLastChildOrAttr(root, "friendlyfire", "friendly-fire"), false);
+  }
+
+  @NotNull
+  private static Map<String, VariantInfo> createVariantMap(Element root)
+      throws InvalidXMLException {
+    ImmutableMap.Builder<String, VariantInfo> variants = ImmutableMap.builder();
+    variants.put(DEFAULT_VARIANT, new VariantData(root, null));
+    for (Element el : root.getChildren("variant")) {
+      VariantData vd = new VariantData(root, el);
+      variants.put(vd.variantId, vd);
+    }
+    return variants.build();
   }
 
   @Override
   public String getId() {
     return id;
+  }
+
+  @Override
+  public String getVariantId() {
+    return variantId;
+  }
+
+  @Override
+  public Map<String, VariantInfo> getVariants() {
+    return variants;
+  }
+
+  @Override
+  public String getWorldFolder() {
+    return worldFolder;
   }
 
   @Override
@@ -135,6 +163,11 @@ public class MapInfoImpl implements MapInfo {
   @Override
   public String getName() {
     return name;
+  }
+
+  @Override
+  public String getNormalizedName() {
+    return normalizedName;
   }
 
   @Override
@@ -169,7 +202,7 @@ public class MapInfoImpl implements MapInfo {
 
   @Override
   public Collection<MapTag> getTags() {
-    return tags;
+    return Collections.unmodifiableCollection(tags);
   }
 
   @Override
@@ -183,8 +216,23 @@ public class MapInfoImpl implements MapInfo {
   }
 
   @Override
+  public Collection<Gamemode> getGamemodes() {
+    return gamemodes;
+  }
+
+  @Override
   public WorldInfo getWorld() {
     return world;
+  }
+
+  @Override
+  public Phase getPhase() {
+    return phase;
+  }
+
+  @Override
+  public boolean getFriendlyFire() {
+    return friendlyFire;
   }
 
   @Override
@@ -200,77 +248,165 @@ public class MapInfoImpl implements MapInfo {
 
   @Override
   public String toString() {
-    return new ToStringBuilder(this).append("id", getId()).build();
+    return "MapInfo{id=" + this.id + ", version=" + this.version + "}";
   }
 
   @Override
-  public MapInfo clone() {
-    return new MapInfoImpl(this);
+  public MapSource getSource() {
+    return source;
+  }
+
+  @Override
+  public @Nullable MapContext getContext() {
+    return context != null ? context.get() : null;
   }
 
   @Override
   public Component getStyledName(MapNameStyle style) {
-    TextComponent.Builder name = TextComponent.builder(getName());
+    TextComponent.Builder name = text().content(getName());
 
-    if (style.isColor) name.color(TextColor.GOLD);
+    if (style.isColor) name.color(NamedTextColor.GOLD);
     if (style.isHighlight) name.decoration(TextDecoration.UNDERLINED, true);
     if (style.showAuthors) {
-      return TranslatableComponent.of(
+      return translatable(
           "misc.authorship",
-          TextColor.DARK_PURPLE,
+          NamedTextColor.DARK_PURPLE,
           name.build(),
           TextFormatter.list(
               getAuthors().stream()
-                  .map(c -> c.getName(NameStyle.PLAIN).color(TextColor.RED))
+                  .map(c -> c.getName(NameStyle.PLAIN).color(NamedTextColor.RED))
                   .collect(Collectors.toList()),
-              TextColor.DARK_PURPLE));
+              NamedTextColor.DARK_PURPLE));
     }
 
     return name.build();
   }
 
-  private static List<String> parseRules(Element root) {
-    List<String> rules = null;
-    for (Element parent : root.getChildren("rules")) {
-      for (Element rule : parent.getChildren("rule")) {
-        if (rules == null) {
-          rules = new LinkedList<>();
-        }
-        rules.add(rule.getTextNormalize());
-      }
-    }
-    return rules;
+  private static @NotNull List<String> parseRules(Element root) {
+    return XMLUtils.flattenElements(root, "rules", "rule").stream()
+        .map(Element::getTextNormalize)
+        .collect(StreamUtils.toImmutableList());
   }
 
-  private static List<Contributor> parseContributors(Element root, String tag)
+  private static @NotNull List<Gamemode> parseGamemodes(Element root) throws InvalidXMLException {
+    ImmutableList.Builder<Gamemode> gamemodes = ImmutableList.builder();
+    for (Element gamemodeEl : root.getChildren("gamemode")) {
+      Gamemode gm = Gamemode.byId(gamemodeEl.getText());
+      if (gm == null) throw new InvalidXMLException("Unknown gamemode", gamemodeEl);
+      gamemodes.add(gm);
+    }
+    return gamemodes.build();
+  }
+
+  private static @NotNull List<Contributor> parseContributors(Element root, String tag)
       throws InvalidXMLException {
-    List<Contributor> contributors = null;
-    for (Element parent : root.getChildren(tag + "s")) {
-      for (Element child : parent.getChildren(tag)) {
-        String name = XMLUtils.getNormalizedNullableText(child);
-        UUID uuid = XMLUtils.parseUuid(Node.fromAttr(child, "uuid"));
-        String contribution = XMLUtils.getNullableAttribute(child, "contribution", "contrib");
+    List<Contributor> contributors = new ArrayList<>();
+    for (Element child : XMLUtils.flattenElements(root, tag + "s", tag)) {
+      String name = XMLUtils.getNormalizedNullableText(child);
+      UUID uuid = XMLUtils.parseUuid(Node.fromAttr(child, "uuid"));
+      String contribution = XMLUtils.getNullableAttribute(child, "contribution", "contrib");
 
-        if (name == null && uuid == null) {
-          throw new InvalidXMLException("Contributor must have either a name or UUID", child);
-        }
-
-        if (contributors == null) {
-          contributors = new LinkedList<>();
-        }
-
-        if (uuid == null) {
-          contributors.add(new PseudonymContributor(name, contribution));
-        } else {
-          contributors.add(new PlayerContributor(uuid, contribution));
-        }
+      if (name == null && uuid == null) {
+        throw new InvalidXMLException("Contributor must have either a name or UUID", child);
       }
+
+      contributors.add(
+          uuid == null
+              ? new PseudonymContributor(name, contribution)
+              : new PlayerContributor(uuid, contribution));
     }
     return contributors;
   }
 
-  private static WorldInfo parseWorld(Element root) throws InvalidXMLException {
+  private static @NotNull WorldInfo parseWorld(Element root) throws InvalidXMLException {
     final Element world = root.getChild("terrain");
     return world == null ? new WorldInfoImpl() : new WorldInfoImpl(world);
+  }
+
+  protected void setContext(MapContextImpl context) {
+    // The first time context is loaded, set properties which can't be
+    // parsed until after modules are parsed, like team sizes or tags.
+    if (this.context == null) {
+      ImmutableSortedSet.Builder<MapTag> tags = ImmutableSortedSet.naturalOrder();
+      ImmutableList.Builder<Integer> players = ImmutableList.builder();
+
+      for (MapModule<?> module : context.getModules()) {
+        tags.addAll(module.getTags());
+
+        if (module instanceof TeamModule)
+          players.addAll(
+              Iterables.transform(((TeamModule) module).getTeams(), TeamFactory::getMaxPlayers));
+
+        if (module instanceof FreeForAllModule)
+          players.add(((FreeForAllModule) module).getOptions().maxPlayers);
+      }
+
+      if (world.hasTerrain()) tags.add(TERRAIN);
+
+      this.tags = tags.build();
+      this.players = players.build();
+
+      // If the map defines no game-modes manually, derive them from map tags, sorted by auxiliary
+      // last.
+      if (this.gamemodes.isEmpty()) {
+        this.gamemodes =
+            this.tags.stream()
+                .filter(MapTag::isGamemode)
+                .sorted(
+                    Comparator.comparing(MapTag::isAuxiliary)
+                        .thenComparing(Comparator.naturalOrder()))
+                .map(MapTag::getGamemode)
+                .collect(StreamUtils.toImmutableList());
+      }
+    }
+    this.context = new SoftReference<>(context);
+  }
+
+  private static class VariantData implements VariantInfo {
+    private final String variantId;
+    private final String mapName;
+    private final String mapId;
+    private final String world;
+
+    public VariantData(Element root, @Nullable Element variantEl) throws InvalidXMLException {
+      String name = assertNotNull(Node.fromRequiredChildOrAttr(root, "name").getValueNormalize());
+      String slug = assertNotNull(root).getChildTextNormalize("slug");
+
+      if (variantEl == null) {
+        this.variantId = DEFAULT_VARIANT;
+        this.mapName = name;
+        this.world = null;
+      } else {
+        this.variantId = Node.fromRequiredAttr(variantEl, "id").getValue();
+        if (DEFAULT_VARIANT.equals(variantId)) {
+          throw new InvalidXMLException("Default variant is not allowed", variantEl);
+        }
+        boolean override = XMLUtils.parseBoolean(Node.fromAttr(variantEl, "override"), false);
+        this.mapName = (override ? "" : name + ": ") + variantEl.getTextNormalize();
+        this.world = variantEl.getAttributeValue("world");
+        if (slug != null) slug += "_" + variantId;
+      }
+      this.mapId = assertNotNull(StringUtils.slugify(slug != null ? slug : mapName));
+    }
+
+    @Override
+    public String getVariantId() {
+      return variantId;
+    }
+
+    @Override
+    public String getMapId() {
+      return mapId;
+    }
+
+    @Override
+    public String getMapName() {
+      return mapName;
+    }
+
+    @Override
+    public String getWorld() {
+      return world;
+    }
   }
 }

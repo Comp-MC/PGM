@@ -1,12 +1,13 @@
 package tc.oc.pgm.regions;
 
+import static net.kyori.adventure.text.Component.translatable;
+
 import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import net.kyori.text.Component;
-import net.kyori.text.TranslatableComponent;
+import net.kyori.adventure.text.Component;
 import org.bukkit.util.Vector;
 import org.jdom2.Attribute;
 import org.jdom2.Element;
@@ -14,11 +15,12 @@ import tc.oc.pgm.api.filter.Filter;
 import tc.oc.pgm.api.map.MapProtos;
 import tc.oc.pgm.api.map.factory.MapFactory;
 import tc.oc.pgm.api.region.Region;
-import tc.oc.pgm.filters.DenyFilter;
-import tc.oc.pgm.filters.FilterNode;
-import tc.oc.pgm.filters.FilterParser;
-import tc.oc.pgm.filters.StaticFilter;
-import tc.oc.pgm.filters.TeamFilter;
+import tc.oc.pgm.filters.matcher.StaticFilter;
+import tc.oc.pgm.filters.matcher.block.MaxBuildFilter;
+import tc.oc.pgm.filters.matcher.party.TeamFilter;
+import tc.oc.pgm.filters.operator.DenyFilter;
+import tc.oc.pgm.filters.operator.FilterNode;
+import tc.oc.pgm.filters.parse.FilterParser;
 import tc.oc.pgm.kits.Kit;
 import tc.oc.pgm.teams.Teams;
 import tc.oc.pgm.util.Version;
@@ -30,10 +32,10 @@ public class RegionFilterApplicationParser {
   private final MapFactory factory;
   private final FilterParser filterParser;
   private final RegionParser regionParser;
-  private final RFAContext rfaContext;
+  private final RFAContext.Builder rfaContext;
   private final Version proto;
 
-  public RegionFilterApplicationParser(MapFactory factory, RFAContext rfaContext) {
+  public RegionFilterApplicationParser(MapFactory factory, RFAContext.Builder rfaContext) {
     this.factory = factory;
     this.rfaContext = rfaContext;
 
@@ -74,7 +76,7 @@ public class RegionFilterApplicationParser {
             new TeamFilter(
                 Teams.getTeamRef(new Node(XMLUtils.getRequiredAttribute(el, "team")), factory)));
     final Region region = parseRegion(el);
-    final Component message = TranslatableComponent.of("match.laneExit");
+    final Component message = translatable("match.laneExit");
 
     prepend(el, new RegionFilterApplication(RFAScope.PLAYER_ENTER, region, filter, message, false));
     prepend(
@@ -83,25 +85,23 @@ public class RegionFilterApplicationParser {
             RFAScope.BLOCK_PLACE, new NegativeRegion(region), filter, message, false));
   }
 
-  public void parseMaxBuildHeight(Element el) throws InvalidXMLException {
-    final Region region =
-        new CuboidRegion(
-            new Vector(
-                Double.NEGATIVE_INFINITY,
-                XMLUtils.parseNumber(el, Integer.class),
-                Double.NEGATIVE_INFINITY),
-            new Vector(
-                Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY));
-    final Component message = TranslatableComponent.of("match.maxBuildHeight");
+  public Integer parseMaxBuildHeight(Element el) throws InvalidXMLException {
+    // Always add the filter, will be no-op as long as the value stays null
+    prepend(
+        el,
+        new RegionFilterApplication(
+            RFAScope.BLOCK_PLACE,
+            EverywhereRegion.INSTANCE,
+            MaxBuildFilter.INSTANCE,
+            translatable("match.maxBuildHeight"),
+            false));
 
-    for (RFAScope scope : Lists.newArrayList(RFAScope.BLOCK_PLACE)) {
-      prepend(el, new RegionFilterApplication(scope, region, StaticFilter.DENY, message, false));
-    }
+    return el == null ? null : XMLUtils.parseNumber(el, Integer.class);
   }
 
   public void parsePlayable(Element el) throws InvalidXMLException {
     final Region region = new NegativeRegion(parseRegion(el));
-    final Component message = TranslatableComponent.of("match.outOfBounds");
+    final Component message = translatable("match.outOfBounds");
 
     for (RFAScope scope :
         Lists.newArrayList(RFAScope.BLOCK_PLACE, RFAScope.BLOCK_BREAK, RFAScope.PLAYER_ENTER)) {
@@ -131,7 +131,7 @@ public class RegionFilterApplicationParser {
     if (attrVelocity != null) {
       // Legacy support
       String velocityText = attrVelocity.getValue();
-      if (velocityText.charAt(0) == '@') velocityText = velocityText.substring(1);
+      if (velocityText.startsWith("@")) velocityText = velocityText.substring(1);
       Vector velocity = XMLUtils.parseVector(attrVelocity, velocityText);
       add(el, new RegionFilterApplication(RFAScope.EFFECT, region, effectFilter, velocity));
     }

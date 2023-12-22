@@ -31,6 +31,13 @@ map:
 
   # A path to a map pools file, or empty to disable map pools.
   pools: "map-pools.yml"
+  
+  # A path to the includes folder, or empty to disable map includes.
+  includes: "includes"
+
+  # Show unused XML nodes as map errors. Helps with finding typos in xml.
+  show-unused-xml: true
+
 
 # Sets the duration of various countdowns.
 #
@@ -44,6 +51,7 @@ countdown:
   start: "30s"    # After a match cycles or /start
   cycle: "30s"    # After a match ends or /cycle
   huddle: -1      # Before a match starts (only recommended for "ranked" matches)
+  restart: "30s"  # After a restart countdown is queued or /qr
 
 # Sets thresholds for when to restart the server.
 #
@@ -70,12 +78,20 @@ gameplay:
 ui:
   sidebar: true    # Enable the side bar?
   tablist: true    # Enable the tab list?
+  tablist-resize: false # Resize the tab list for 1.7 players? Requires ProtocolLib
   ping: false      # Should tab list show real ping?
   proximity: false # Should the proximity of objectives be visible?
   fireworks: true  # Spawn fireworks after objectives are completed?
   participants-see-observers: true # Can participants see observers in the tab list?
   flag-beams: false # Should everyone see floating wool flag beams?
-  verbose-stats: false # Enable more thorough stats at the end of each match
+
+# Changes how stats are shown.
+stats:
+  verbose: true   # Enable more detailed stats?
+  show-after: 6s  # How long to wait after the match ends to show stats?
+  show-best: true # Should show best players stats?
+  show-own: true  # Should show each players own stats?
+  item-slot: 7    # In what slot should we place the verbose stats item?
 
 # Overrides the header and footer of the side bar.
 sidebar:
@@ -169,13 +185,6 @@ groups:
     permissions:
       - "+pgm.premium"
 
-# Enables "community mode" with features such as /report, /freeze, /warn, and /ban.
-community:
-  enabled: true   # Is community mode enabled?
-  server-name: "" # Name of your server, displayed when players are kicked.
-  rules-link: ""  # A URL to a rules website, displayed when players are kicked.
-  appeal-msg: ""  # A message, displayed on the kick screen, if a player is banned.
-
 # Overrides the default database uri.
 #
 # Only SQLite and MySQL-compatible databases officially supported.
@@ -185,5 +194,13 @@ community:
 # Please do *not* edit this option unless you know what you're doing.
 database-uri: ""
 
+# Maximum connections a database will establish
+database-max-connections: 5
+
+# Enable the simple vanish manager, disable if you want other plugins to handle this
+vanish: true
+
 # Experimental features that are not yet stable.
-experiments: {}
+experiments:
+  # Enable payload preview. This is not fully finished and xml syntax is likely to change at a later time.
+  payload: false

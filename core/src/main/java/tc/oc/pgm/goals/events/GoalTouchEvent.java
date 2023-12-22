@@ -1,18 +1,17 @@
 package tc.oc.pgm.goals.events;
 
-import com.google.common.base.Preconditions;
+import static tc.oc.pgm.util.Assert.assertNotNull;
+
 import java.time.Instant;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import org.bukkit.event.HandlerList;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.goals.TouchableGoal;
 
 /** Raised when a player touches a goal. */
 public class GoalTouchEvent extends GoalEvent {
-  private static final HandlerList handlers = new HandlerList();
-
   private final TouchableGoal goal;
   private final @Nullable Competitor competitor;
   private final boolean firstForCompetitor;
@@ -47,9 +46,9 @@ public class GoalTouchEvent extends GoalEvent {
     this.firstForCompetitor = firstForCompetitor;
     this.firstForPlayer = firstForPlayer;
     this.firstForPlayerLife = firstForPlayerLife;
-    this.goal = Preconditions.checkNotNull(goal, "Goal");
+    this.goal = assertNotNull(goal, "Goal");
     this.player = player;
-    this.time = Preconditions.checkNotNull(time, "Time");
+    this.time = assertNotNull(time, "Time");
   }
 
   public GoalTouchEvent(TouchableGoal goal, Instant time) {
@@ -61,7 +60,7 @@ public class GoalTouchEvent extends GoalEvent {
   }
 
   @Override
-  public @Nonnull Competitor getCompetitor() { // remove @Nullable
+  public @NotNull Competitor getCompetitor() { // remove @Nullable
     //noinspection ConstantConditions
     return super.getCompetitor();
   }
@@ -94,6 +93,8 @@ public class GoalTouchEvent extends GoalEvent {
   public void setCancelToucherMessage(boolean cancelToucherMessage) {
     this.cancelToucherMessage = cancelToucherMessage;
   }
+
+  private static final HandlerList handlers = new HandlerList();
 
   public static HandlerList getHandlerList() {
     return handlers;

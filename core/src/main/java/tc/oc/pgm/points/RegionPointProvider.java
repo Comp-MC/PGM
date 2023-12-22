@@ -1,13 +1,14 @@
 package tc.oc.pgm.points;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 
-import javax.annotation.Nullable;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.region.Region;
 import tc.oc.pgm.util.block.BlockVectors;
@@ -20,7 +21,7 @@ public class RegionPointProvider implements PointProvider {
 
   public RegionPointProvider(Region region, PointProviderAttributes attributes) {
     this.attributes = attributes;
-    this.region = checkNotNull(region, "region");
+    this.region = assertNotNull(region, "region");
     ;
   }
 
@@ -38,7 +39,9 @@ public class RegionPointProvider implements PointProvider {
   public Location getPoint(Match match, @Nullable Entity entity) {
     Vector pos = this.region.getRandom(match.getRandom());
     PointProviderLocation location =
-        new PointProviderLocation(match.getWorld(), pos.getX(), pos.getY(), pos.getZ());
+        makeSafe(new PointProviderLocation(match.getWorld(), pos.getX(), pos.getY(), pos.getZ()));
+
+    if (location == null) return null;
 
     if (attributes.getYawProvider() != null) {
       location.setYaw(attributes.getYawProvider().getAngle(pos));
@@ -50,14 +53,10 @@ public class RegionPointProvider implements PointProvider {
       location.setHasPitch(true);
     }
 
-    location = makeSafe(location);
-
     return location;
   }
 
-  private PointProviderLocation makeSafe(PointProviderLocation location) {
-    if (location == null) return null;
-
+  private @Nullable PointProviderLocation makeSafe(@NotNull PointProviderLocation location) {
     // If the initial point is safe, just return it
     if (isSpawnable(location)) return location;
 
@@ -92,9 +91,8 @@ public class RegionPointProvider implements PointProvider {
   }
 
   private boolean isSpawnable(Location location) {
-    if (attributes.isSafe() && !isSafe(location)) return false;
-    if (attributes.isOutdoors() && !isOutdoors(location)) return false;
-    return true;
+    return (!attributes.isSafe() || isSafe(location))
+        && (!attributes.isOutdoors() || isOutdoors(location));
   }
 
   /**

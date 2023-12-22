@@ -6,21 +6,23 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
-import javax.annotation.Nullable;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.Permissions;
+import tc.oc.pgm.api.event.NameDecorationChangeEvent;
+import tc.oc.pgm.api.integration.Integration;
 import tc.oc.pgm.api.match.Match;
+import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.party.Party;
 import tc.oc.pgm.api.player.MatchPlayer;
-import tc.oc.pgm.community.events.PlayerVanishEvent;
+import tc.oc.pgm.api.player.event.PlayerVanishEvent;
 import tc.oc.pgm.events.PlayerJoinMatchEvent;
 import tc.oc.pgm.events.PlayerPartyChangeEvent;
-import tc.oc.pgm.match.ObservingParty;
 import tc.oc.pgm.teams.Team;
 import tc.oc.pgm.teams.TeamMatchModule;
 import tc.oc.pgm.util.tablist.TabEntry;
@@ -110,7 +112,7 @@ public class MatchTabView extends TabView implements Listener {
   public void render() {
     if (this.manager == null) return;
 
-    if (this.match != null && this.isLayoutDirty()) {
+    if (this.match != null && dirtyTracker.isLayout()) {
       if (display == null) {
         this.setHeader(this.getManager().getMapEntry(this.match));
         this.setFooter(this.getManager().getFooterEntry(this.match));
@@ -136,22 +138,21 @@ public class MatchTabView extends TabView implements Listener {
         observerRows = getObserverRows(observingPlayers, observingStaff, participantRows);
         participantRows = availableRows - observerRows;
 
-        int columnsPerTeam = Math.max(1, this.getWidth() / Math.max(1, teams.size()));
-
         int y1 = this.getHeader();
         Iterator<Team> teamIt = teams.iterator();
         while (teamIt.hasNext()) {
           int y2 = y1;
-          for (int x1 = 0; x1 < getWidth(); x1 += columnsPerTeam) {
+          for (int x1 = 0; x1 < getWidth(); ) {
             if (!teamIt.hasNext()) {
-              fillEmpty(x1, x1 + columnsPerTeam, y1, y2);
-              continue;
+              fillEmpty(x1, this.getWidth(), y1, y2);
+              break;
             }
 
             Team team = teamIt.next();
+            int columnsForTeam = getColumnsForTeam(team, teams);
             int currY2 = participantRows + getHeader(); // Default to max height
             // Size tightly vertically when teams don't use multiple columns
-            if (columnsPerTeam == 1) currY2 = Math.min(y1 + team.getPlayers().size() + 2, currY2);
+            if (columnsForTeam == 1) currY2 = Math.min(y1 + team.getPlayers().size() + 2, currY2);
 
             if (currY2 > y2) {
               // If the max y on this row of teams increases, fill the void under previous teams
@@ -166,10 +167,12 @@ public class MatchTabView extends TabView implements Listener {
                   true,
                   true,
                   x1,
-                  x1 + columnsPerTeam,
+                  x1 + columnsForTeam,
                   y1,
                   y2);
             }
+
+            x1 += columnsForTeam;
           }
 
           y1 = y2;
@@ -220,19 +223,33 @@ public class MatchTabView extends TabView implements Listener {
   }
 
   private int getMinimumParticipantRows(Collection<Team> teams) {
-    int columnsPerTeam = Math.max(1, this.getWidth() / Math.max(1, teams.size()));
     int teamsPerColumn = Math.min(this.getWidth(), teams.size());
 
     int biggestTeamColumn = 0;
     Iterator<Team> teamIt = teams.iterator();
     while (teamIt.hasNext()) {
-      int biggestTeam = 0;
-      for (int x = 0; x < teamsPerColumn && teamIt.hasNext(); x++)
-        biggestTeam = Math.max(biggestTeam, teamIt.next().getPlayers().size());
+      int mostRows = 0;
+      for (int x = 0; x < teamsPerColumn && teamIt.hasNext(); x++) {
+        Team team = teamIt.next();
+        mostRows =
+            Math.max(
+                mostRows,
+                divideRoundingUp(team.getPlayers().size(), getColumnsForTeam(team, teams)));
+      }
 
-      biggestTeamColumn += 2 + divideRoundingUp(biggestTeam, columnsPerTeam);
+      biggestTeamColumn += 2 + mostRows;
     }
     return biggestTeamColumn;
+  }
+
+  private int getColumnsForTeam(Team team, Collection<Team> teams) {
+    if (teams.size() < getWidth()) {
+      float cols = (float) team.getMaxPlayers() * getWidth() / match.getMaxPlayers();
+      if (cols % 1 == 0.5 && cols > ((float) getWidth() / teams.size())) cols -= 0.5;
+      return Math.max(1, Math.min(Math.round(cols), getWidth() - teams.size() + 1));
+    } else {
+      return 1;
+    }
   }
 
   private int getObserverRows(int observers, int observingStaff, int participantRows) {
@@ -266,7 +283,7 @@ public class MatchTabView extends TabView implements Listener {
         }
       }
 
-      this.invalidateLayout();
+      dirtyTracker.invalidateLayout();
     }
   }
 
@@ -275,12 +292,21 @@ public class MatchTabView extends TabView implements Listener {
     if (this.match != event.getMatch()) return;
 
     updatePlayerParty(event.getPlayer(), event.getOldParty(), event.getNewParty());
+
+    // Your own view should re-render quickly after join/leave
+    if (this.matchPlayer == event.getPlayer()) dirtyTracker.prioritize();
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPlayerVanish(PlayerVanishEvent event) {
     updatePlayerParty(
         event.getPlayer(), event.getPlayer().getParty(), event.getPlayer().getParty());
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+  public void onPlayerNameChange(NameDecorationChangeEvent event) {
+    MatchPlayer mp = match.getPlayer(event.getUUID());
+    if (mp != null) updatePlayerParty(mp, mp.getParty(), mp.getParty());
   }
 
   private void updatePlayerParty(
@@ -294,7 +320,7 @@ public class MatchTabView extends TabView implements Listener {
 
     if (newParty != null && !shouldHide(player)) {
       List<MatchPlayer> players =
-          newParty instanceof ObservingParty ? observerPlayers : participantPlayers;
+          newParty instanceof Competitor ? participantPlayers : observerPlayers;
 
       if (!players.contains(player)) players.add(player);
 
@@ -302,13 +328,13 @@ public class MatchTabView extends TabView implements Listener {
         this.teamPlayers.put((Team) newParty, player);
     }
 
-    this.invalidateLayout();
+    dirtyTracker.invalidateLayout();
   }
 
   private boolean shouldHide(MatchPlayer other) {
     return other != matchPlayer
-        && other.isVanished()
-        && !matchPlayer.getBukkit().hasPermission(Permissions.STAFF);
+        && Integration.isVanished(other.getBukkit())
+        && !matchPlayer.getBukkit().hasPermission(Permissions.VANISH);
   }
 
   private static int divideRoundingUp(int numerator, int denominator) {

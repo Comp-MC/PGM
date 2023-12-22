@@ -1,7 +1,7 @@
 package tc.oc.pgm.api.event;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
+import static tc.oc.pgm.util.Assert.assertNotNull;
+import static tc.oc.pgm.util.Assert.assertTrue;
 
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -13,15 +13,17 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.entity.ExplosionPrimeByEntityEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.material.MaterialData;
 import tc.oc.pgm.blockdrops.BlockDrops;
 import tc.oc.pgm.util.block.BlockStates;
+import tc.oc.pgm.util.event.GeneralizedEvent;
+import tc.oc.pgm.util.event.entity.ExplosionPrimeByEntityEvent;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 /** Called when a {@link Block} transforms from one {@link BlockState} to another. */
-public class BlockTransformEvent extends GeneralizingEvent {
+public class BlockTransformEvent extends GeneralizedEvent {
 
   private final Block block;
   private final BlockState oldState;
@@ -31,23 +33,23 @@ public class BlockTransformEvent extends GeneralizingEvent {
   private BlockDrops drops;
 
   public BlockTransformEvent(Event cause, Block block, BlockState oldState, BlockState newState) {
-    super(checkNotNull(cause));
-    this.block = checkNotNull(block);
-    this.oldState = checkNotNull(oldState);
-    this.newState = checkNotNull(newState);
-    checkArgument(block.getWorld().equals(oldState.getWorld()));
-    checkArgument(block.getWorld().equals(newState.getWorld()));
+    super(assertNotNull(cause));
+    this.block = assertNotNull(block);
+    this.oldState = assertNotNull(oldState);
+    this.newState = assertNotNull(newState);
+    assertTrue(block.getWorld().equals(oldState.getWorld()));
+    assertTrue(block.getWorld().equals(newState.getWorld()));
   }
 
   public BlockTransformEvent(Event cause, BlockState oldState, BlockState newState) {
-    this(cause, checkNotNull(oldState).getBlock(), oldState, newState);
+    this(cause, assertNotNull(oldState).getBlock(), oldState, newState);
   }
 
   public BlockTransformEvent(Event cause, Block block, MaterialData newMaterial) {
     this(
         cause,
         block,
-        checkNotNull(block).getState(),
+        assertNotNull(block).getState(),
         BlockStates.cloneWithMaterial(block, newMaterial));
   }
 
@@ -55,7 +57,7 @@ public class BlockTransformEvent extends GeneralizingEvent {
     this(
         cause,
         block,
-        checkNotNull(block).getState(),
+        assertNotNull(block).getState(),
         BlockStates.cloneWithMaterial(block, newMaterial));
   }
 
@@ -96,8 +98,7 @@ public class BlockTransformEvent extends GeneralizingEvent {
       return newState;
     } else {
       final BlockState state = newState.getBlock().getState();
-      state.setType(drops.replacement.getItemType());
-      state.setData(drops.replacement);
+      NMSHacks.setBlockStateData(state, drops.replacement);
       return state;
     }
   }

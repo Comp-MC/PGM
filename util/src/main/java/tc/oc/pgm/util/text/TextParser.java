@@ -1,6 +1,6 @@
 package tc.oc.pgm.util.text;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 import static tc.oc.pgm.util.text.TextException.invalidFormat;
 import static tc.oc.pgm.util.text.TextException.outOfRange;
 import static tc.oc.pgm.util.text.TextException.unknown;
@@ -16,18 +16,25 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
-import net.kyori.text.Component;
-import net.kyori.text.serializer.gson.GsonComponentSerializer;
-import net.kyori.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Chunk;
 import org.bukkit.util.Vector;
-import tc.oc.pgm.util.LiquidMetal;
+import org.jetbrains.annotations.NotNull;
+import tc.oc.pgm.util.StringUtils;
 import tc.oc.pgm.util.TimeUtils;
 import tc.oc.pgm.util.Version;
+import tc.oc.pgm.util.bukkit.BukkitUtils;
+import tc.oc.pgm.util.xml.Node;
+import tc.oc.pgm.util.xml.XMLUtils;
 
 /** A string parser that generates user-friendly error messages. */
 public final class TextParser {
@@ -50,12 +57,12 @@ public final class TextParser {
    * @throws TextException If the text is not a boolean.
    */
   public static boolean parseBoolean(String text) throws TextException {
-    checkNotNull(text, "cannot parse boolean from null");
+    assertNotNull(text, "cannot parse boolean from null");
 
     if (YES.matcher(text).matches()) return true;
     if (NO.matcher(text).matches()) return false;
 
-    throw invalidFormat(text, boolean.class, null);
+    throw invalidFormat(text, boolean.class);
   }
 
   /**
@@ -69,7 +76,7 @@ public final class TextParser {
    * @throws TextException If the text is invalid or out of range.
    */
   public static int parseInteger(String text, Range<Integer> range) throws TextException {
-    checkNotNull(text, "cannot parse integer from null");
+    assertNotNull(text, "cannot parse integer from null");
 
     final int number;
     if (INF.matcher(text).matches()) {
@@ -82,11 +89,14 @@ public final class TextParser {
       }
     }
 
-    if (range != null && !range.contains(number)) {
-      throw outOfRange(text, range);
-    }
+    if (range != null) assertInRange(number, range);
 
     return number;
+  }
+
+  public static <T extends Comparable<T>> void assertInRange(
+      @NotNull T val, @NotNull Range<T> range) {
+    if (!range.contains(val)) throw outOfRange(val.toString(), range);
   }
 
   /**
@@ -112,7 +122,7 @@ public final class TextParser {
    * @throws TextException If the text is invalid or out of range.
    */
   public static float parseFloat(String text, Range<Float> range) throws TextException {
-    checkNotNull(text, "cannot parse float from null");
+    assertNotNull(text, "cannot parse float from null");
 
     final float number;
     if (INF.matcher(text).matches()) {
@@ -155,7 +165,7 @@ public final class TextParser {
    * @throws TextException If the text is invalid or out of range.
    */
   public static Duration parseDuration(String text, Range<Duration> range) throws TextException {
-    checkNotNull(text, "cannot parse duration from null");
+    assertNotNull(text, "cannot parse duration from null");
 
     Duration duration;
     if (INF.matcher(text).matches()) {
@@ -188,7 +198,7 @@ public final class TextParser {
     }
 
     if (range != null && !range.contains(duration)) {
-      throw TextException.outOfRange(text, range);
+      throw outOfRange(text, range);
     }
 
     return duration;
@@ -217,14 +227,14 @@ public final class TextParser {
    */
   public static Vector parseVector3d(String text, Range<Float> rangeXZ, Range<Float> rangeY)
       throws TextException {
-    checkNotNull(text, "cannot parse vector from null");
+    assertNotNull(text, "cannot parse vector from null");
 
     final boolean twod = rangeY == null; // If 2D, then y = 0
     final Class<?> type = twod ? Chunk.class : Vector.class;
     final String[] components = COMMA.split(text, 3);
 
     if (components.length != (twod ? 2 : 3)) {
-      throw invalidFormat(text, type, null);
+      throw invalidFormat(text, type);
     }
 
     return new Vector(
@@ -278,13 +288,13 @@ public final class TextParser {
    * @throws TextException If the text is invalid or out of range.
    */
   public static Version parseVersion(String text, Range<Version> range) throws TextException {
-    checkNotNull(text, "cannot parse version from null");
+    assertNotNull(text, "cannot parse version from null");
 
     final String[] components = DOT.split(text, 3);
     final int size = components.length;
 
     if (size < 1 || size > 3) {
-      throw invalidFormat(text, Version.class, null);
+      throw invalidFormat(text, Version.class);
     }
 
     final int major = parseInteger(components[0], NONNEG);
@@ -325,22 +335,13 @@ public final class TextParser {
    */
   public static <E extends Enum<E>> E parseEnum(
       String text, Class<E> type, Range<E> range, boolean fuzzyMatch) throws TextException {
-    checkNotNull(text, "cannot parse enum " + type.getSimpleName().toLowerCase() + "  from null");
+    assertNotNull(text, "cannot parse enum " + type.getSimpleName().toLowerCase() + "  from null");
 
-    double maxScore = 0;
-    E value = null;
+    String name = text.replace(' ', '_');
+    E value = StringUtils.bestFuzzyMatch(name, type);
 
-    for (E each : type.getEnumConstants()) {
-      final double score = LiquidMetal.score(each.name(), text.replace(' ', '_'));
-      if (score >= maxScore) {
-        maxScore = score;
-        value = each;
-      }
-      if (score >= 1) break;
-    }
-
-    if (maxScore < 0.25 || (!fuzzyMatch && maxScore < 1)) {
-      throw invalidFormat(text, type, value.name().toLowerCase(), null);
+    if (value == null || (!fuzzyMatch && !name.equalsIgnoreCase(value.name()))) {
+      throw invalidFormat(text, type, value != null ? value.name().toLowerCase() : null, null);
     }
 
     if (range != null && !range.contains(value)) {
@@ -365,6 +366,40 @@ public final class TextParser {
   }
 
   /**
+   * Parses text into a UUID.
+   *
+   * @param text The text.
+   * @return A UUID.
+   * @throws TextException If the text is invalid.
+   */
+  public static UUID parseUuid(String text) throws TextException {
+    assertNotNull(text, "cannot parse uuid from null");
+
+    try {
+      return UUID.fromString(text);
+    } catch (IllegalArgumentException e) {
+      throw invalidFormat(text, UUID.class, e);
+    }
+  }
+
+  /**
+   * Parses text into a date.
+   *
+   * @param text The text.
+   * @return A date.
+   * @throws TextException If the text is invalid.
+   */
+  public static LocalDate parseDate(String text) throws TextException {
+    assertNotNull(text, "cannot parse date from null");
+
+    try {
+      return LocalDate.parse(text, DateTimeFormatter.ISO_LOCAL_DATE);
+    } catch (DateTimeParseException e) {
+      throw invalidFormat(text, LocalDate.class, e);
+    }
+  }
+
+  /**
    * Parses text into a text component.
    *
    * <p>Accepts legacy formatting with "&" as the color character.
@@ -376,17 +411,48 @@ public final class TextParser {
    * @throws TextException If there is json present and it is invalid.
    */
   public static Component parseComponent(String text) throws TextException {
-    checkNotNull(text, "cannot parse component from null");
+    assertNotNull(text, "cannot parse component from null");
 
-    if (text.startsWith("{") && text.endsWith("}")) {
+    if (text.startsWith("{\"") && text.endsWith("\"}")) {
       try {
-        return GsonComponentSerializer.INSTANCE.deserialize(text);
+        return GsonComponentSerializer.gson().deserialize(text);
       } catch (JsonSyntaxException e) {
         throw invalidFormat(text, Component.class, e);
       }
     }
 
-    return LegacyComponentSerializer.legacy().deserialize(text, '&');
+    return LegacyComponentSerializer.legacyAmpersand().deserialize(text);
+  }
+
+  /**
+   * Parses text into a component
+   *
+   * <p>Accepts legacy formatting with "§" as the color character.
+   *
+   * <p>Accepts full qualified json strings as components.
+   *
+   * <p>This method is mainly for backwards compatability for {@link
+   * XMLUtils#parseFormattedText(Node, Component)}. Previously using {@link #parseComponent(String)}
+   * with the result from {@code parseFormattedText} would bug out when sent to older clients, since
+   * the LegacyComponentSerializer expects "&" but {@link BukkitUtils#colorize(String)}(Used in the
+   * XMLUtils method) results in using "§".
+   *
+   * @param text The text.
+   * @return a Component.
+   * @throws TextException If there is json present and it is invalid.
+   */
+  public static Component parseComponentSection(String text) {
+    assertNotNull(text, "cannot parse component from null");
+
+    if (text.startsWith("{\"") && text.endsWith("\"}")) {
+      try {
+        return GsonComponentSerializer.gson().deserialize(text);
+      } catch (Throwable t) {
+        throw invalidFormat(text, Component.class, t);
+      }
+    }
+
+    return LegacyComponentSerializer.legacySection().deserialize(text);
   }
 
   /**
@@ -399,7 +465,7 @@ public final class TextParser {
    */
   @Deprecated
   public static String parseComponentLegacy(String text) throws TextException {
-    return LegacyComponentSerializer.legacy().serialize(parseComponent(text));
+    return LegacyComponentSerializer.legacySection().serialize(parseComponent(text));
   }
 
   /**
@@ -410,7 +476,7 @@ public final class TextParser {
    * @throws TextException If the text is invalid.
    */
   public static Level parseLogLevel(String text) throws TextException {
-    checkNotNull(text, "cannot parse log level from null");
+    assertNotNull(text, "cannot parse log level from null");
 
     try {
       return Level.parse(text.toUpperCase());
@@ -427,10 +493,10 @@ public final class TextParser {
    * @throws TextException If the text is invalid.
    */
   public static URI parseUri(String text) throws TextException {
-    checkNotNull(text, "cannot parse uri from null");
+    assertNotNull(text, "cannot parse uri from null");
 
     if (text.trim().isEmpty()) {
-      throw invalidFormat(text, URI.class, null);
+      throw invalidFormat(text, URI.class);
     }
 
     try {
@@ -448,7 +514,7 @@ public final class TextParser {
    * @throws TextException If the text is invalid or the connection cannot be made.
    */
   public static Connection parseSqlConnection(String text) throws TextException {
-    checkNotNull(text, "cannot parse sql connection from null");
+    assertNotNull(text, "cannot parse sql connection from null");
 
     final URI uri;
     try {
@@ -462,7 +528,7 @@ public final class TextParser {
     final String scheme = uri.getScheme();
     try {
       if (scheme == null || scheme.isEmpty()) {
-        throw invalidFormat(text, URI.class, null);
+        throw invalidFormat(text, URI.class);
       } else if (scheme.startsWith("sqlite")) {
         Class.forName("org.sqlite.JDBC");
       } else if (scheme.startsWith("mysql")) {

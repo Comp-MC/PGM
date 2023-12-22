@@ -1,20 +1,24 @@
 package tc.oc.pgm.classes;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 
 import org.bukkit.event.HandlerList;
-import tc.oc.pgm.api.match.Match;
-import tc.oc.pgm.api.match.event.MatchEvent;
 import tc.oc.pgm.api.player.MatchPlayer;
+import tc.oc.pgm.api.player.event.MatchPlayerEvent;
 
-public class PlayerClassChangeEvent extends MatchEvent {
+public class PlayerClassChangeEvent extends MatchPlayerEvent {
+  private final MatchPlayer player;
+  private final String family;
+  private final PlayerClass oldClass;
+  private final PlayerClass newClass;
+
   public PlayerClassChangeEvent(
-      Match match, MatchPlayer player, String family, PlayerClass oldClass, PlayerClass newClass) {
-    super(match);
-    this.player = checkNotNull(player, "player");
-    this.family = checkNotNull(family, "family");
-    this.oldClass = checkNotNull(oldClass, "old class");
-    this.newClass = checkNotNull(newClass, "new class");
+      MatchPlayer player, String family, PlayerClass oldClass, PlayerClass newClass) {
+    super(player);
+    this.player = assertNotNull(player, "player");
+    this.family = assertNotNull(family, "family");
+    this.oldClass = assertNotNull(oldClass, "old class");
+    this.newClass = assertNotNull(newClass, "new class");
   }
 
   public MatchPlayer getPlayer() {
@@ -32,11 +36,6 @@ public class PlayerClassChangeEvent extends MatchEvent {
   public PlayerClass getNewClass() {
     return this.newClass;
   }
-
-  final MatchPlayer player;
-  final String family;
-  final PlayerClass oldClass;
-  final PlayerClass newClass;
 
   @Override
   public HandlerList getHandlers() {

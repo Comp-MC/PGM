@@ -1,8 +1,8 @@
 package tc.oc.pgm.wool;
 
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
+import static net.kyori.adventure.text.Component.text;
+
+import net.kyori.adventure.text.Component;
 import org.apache.commons.lang.StringUtils;
 import org.bukkit.DyeColor;
 import org.bukkit.inventory.Inventory;
@@ -11,10 +11,12 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.MaterialData;
 import org.bukkit.material.Wool;
 import org.bukkit.util.Vector;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.feature.FeatureInfo;
 import tc.oc.pgm.api.region.Region;
 import tc.oc.pgm.goals.ProximityGoalDefinition;
 import tc.oc.pgm.goals.ProximityMetric;
+import tc.oc.pgm.goals.ShowOptions;
 import tc.oc.pgm.teams.TeamFactory;
 import tc.oc.pgm.util.bukkit.BukkitUtils;
 import tc.oc.pgm.util.text.TextFormatter;
@@ -25,7 +27,6 @@ public class MonumentWoolFactory extends ProximityGoalDefinition {
   protected final Vector location;
   protected final Region placement;
   protected final boolean craftable;
-  protected final boolean visible;
   protected final Component componentName;
 
   public static String makeColorName(DyeColor color) {
@@ -41,14 +42,13 @@ public class MonumentWoolFactory extends ProximityGoalDefinition {
   }
 
   public static Component makeComponentName(DyeColor color) {
-    return TextComponent.of(
-        makeName(color), TextFormatter.convert((BukkitUtils.dyeColorToChatColor(color))));
+    return text(makeName(color), TextFormatter.convert((BukkitUtils.dyeColorToChatColor(color))));
   }
 
   public MonumentWoolFactory(
       @Nullable String id,
       @Nullable Boolean required,
-      boolean visible,
+      ShowOptions showOptions,
       TeamFactory owner,
       @Nullable ProximityMetric woolProximityMetric,
       @Nullable ProximityMetric monumentProximityMetric,
@@ -61,7 +61,7 @@ public class MonumentWoolFactory extends ProximityGoalDefinition {
         id,
         makeName(color),
         required,
-        visible,
+        showOptions,
         owner,
         woolProximityMetric,
         monumentProximityMetric);
@@ -69,7 +69,6 @@ public class MonumentWoolFactory extends ProximityGoalDefinition {
     this.location = location;
     this.placement = placement;
     this.craftable = craftable;
-    this.visible = visible;
     this.componentName = makeComponentName(color);
   }
 
@@ -86,7 +85,7 @@ public class MonumentWoolFactory extends ProximityGoalDefinition {
         + ", craftable="
         + this.craftable
         + ", visible="
-        + this.visible
+        + this.getShowOptions()
         + "}";
   }
 

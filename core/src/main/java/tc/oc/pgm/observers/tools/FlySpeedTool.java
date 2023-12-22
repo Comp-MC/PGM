@@ -1,63 +1,57 @@
 package tc.oc.pgm.observers.tools;
 
+import static net.kyori.adventure.text.Component.translatable;
+
 import com.google.common.collect.Lists;
 import java.util.List;
-import net.kyori.text.Component;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
-import net.md_5.bungee.api.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Material;
+import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
-import tc.oc.pgm.api.player.MatchPlayer;
-import tc.oc.pgm.menu.InventoryMenu;
-import tc.oc.pgm.menu.InventoryMenuItem;
+import tc.oc.pgm.menu.MenuItem;
 import tc.oc.pgm.util.text.TextTranslations;
 
-public class FlySpeedTool implements InventoryMenuItem {
+public class FlySpeedTool implements MenuItem {
 
   private static final String TRANSLATION_KEY = "setting.flyspeed.";
 
   @Override
-  public Component getName() {
-    return TranslatableComponent.of("setting.flyspeed");
+  public Component getDisplayName() {
+    return translatable("setting.flyspeed", NamedTextColor.DARK_RED);
   }
 
   @Override
-  public ChatColor getColor() {
-    return ChatColor.DARK_RED;
+  public List<String> getLore(Player player) {
+    Component flySpeed = FlySpeed.of(player.getFlySpeed()).getName();
+    Component lore = translatable("setting.flyspeed.lore", NamedTextColor.GRAY, flySpeed);
+    return Lists.newArrayList(TextTranslations.translateLegacy(lore, player));
   }
 
   @Override
-  public List<String> getLore(MatchPlayer player) {
-    Component flySpeed = FlySpeed.of(player.getBukkit().getFlySpeed()).getName();
-    Component lore = TranslatableComponent.of("setting.flyspeed.lore", TextColor.GRAY, flySpeed);
-    return Lists.newArrayList(TextTranslations.translateLegacy(lore, player.getBukkit()));
-  }
-
-  @Override
-  public Material getMaterial(MatchPlayer player) {
+  public Material getMaterial(Player player) {
     return Material.FEATHER;
   }
 
   @Override
-  public void onInventoryClick(InventoryMenu menu, MatchPlayer player, ClickType clickType) {
-    FlySpeed speed = FlySpeed.of(player.getBukkit().getFlySpeed());
-    if (clickType.isRightClick()) {
-      player.getBukkit().setFlySpeed(speed.getPrev().getValue());
+  public void onClick(Player player, ClickType click) {
+    FlySpeed speed = FlySpeed.of(player.getFlySpeed());
+    if (click.isRightClick()) {
+      player.setFlySpeed(speed.getPrev().getValue());
     } else {
-      player.getBukkit().setFlySpeed(speed.getNext().getValue());
+      player.setFlySpeed(speed.getNext().getValue());
     }
-    menu.refreshWindow(player);
   }
 
   public enum FlySpeed {
-    NORMAL(TextColor.YELLOW, 0.1f),
-    FAST(TextColor.GOLD, 0.25f),
-    FASTER(TextColor.RED, 0.5f),
-    HYPERSPEED(TextColor.LIGHT_PURPLE, 0.9f);
+    NORMAL(NamedTextColor.YELLOW, 0.1f),
+    FAST(NamedTextColor.GOLD, 0.25f),
+    FASTER(NamedTextColor.RED, 0.5f),
+    HYPERSPEED(NamedTextColor.LIGHT_PURPLE, 0.9f);
 
-    private TextColor color;
-    private float value;
+    private final TextColor color;
+    private final float value;
 
     private static FlySpeed[] speeds = values();
 
@@ -71,7 +65,7 @@ public class FlySpeedTool implements InventoryMenuItem {
     }
 
     public Component getName() {
-      return TranslatableComponent.of(TRANSLATION_KEY + this.name().toLowerCase(), color);
+      return translatable(TRANSLATION_KEY + this.name().toLowerCase(), color);
     }
 
     public FlySpeed getNext() {

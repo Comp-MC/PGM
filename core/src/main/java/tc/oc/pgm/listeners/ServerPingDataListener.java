@@ -1,6 +1,6 @@
 package tc.oc.pgm.listeners;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -19,6 +19,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.ServerListPingEvent;
 import tc.oc.pgm.api.PGM;
+import tc.oc.pgm.api.integration.Integration;
 import tc.oc.pgm.api.map.Contributor;
 import tc.oc.pgm.api.map.MapInfo;
 import tc.oc.pgm.api.map.MapOrder;
@@ -26,7 +27,6 @@ import tc.oc.pgm.api.map.MapTag;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchManager;
 import tc.oc.pgm.api.match.event.MatchLoadEvent;
-import tc.oc.pgm.api.player.VanishManager;
 import tc.oc.pgm.map.contrib.PlayerContributor;
 import tc.oc.pgm.util.ClassLogger;
 
@@ -38,17 +38,11 @@ public class ServerPingDataListener implements Listener {
   private final AtomicBoolean ready;
   private final AtomicBoolean legacySportPaper;
   private final LoadingCache<Match, JsonObject> matchCache;
-  private final VanishManager vanishManager;
 
-  public ServerPingDataListener(
-      MatchManager matchManager,
-      MapOrder mapOrder,
-      Logger parentLogger,
-      VanishManager vanishManager) {
-    this.matchManager = checkNotNull(matchManager);
-    this.mapOrder = checkNotNull(mapOrder);
-    this.logger = ClassLogger.get(checkNotNull(parentLogger), ServerPingDataListener.class);
-    this.vanishManager = checkNotNull(vanishManager);
+  public ServerPingDataListener(MatchManager matchManager, MapOrder mapOrder, Logger parentLogger) {
+    this.matchManager = assertNotNull(matchManager);
+    this.mapOrder = assertNotNull(mapOrder);
+    this.logger = ClassLogger.get(assertNotNull(parentLogger), ServerPingDataListener.class);
     this.ready = new AtomicBoolean();
     this.legacySportPaper = new AtomicBoolean();
     this.matchCache =
@@ -79,7 +73,7 @@ public class ServerPingDataListener implements Listener {
     Iterator<Player> playerSample = event.iterator();
     while (playerSample.hasNext()) {
       Player player = playerSample.next();
-      if (vanishManager.isVanished(player.getUniqueId())) {
+      if (Integration.isVanished(player)) {
         playerSample.remove();
       }
     }
@@ -104,8 +98,8 @@ public class ServerPingDataListener implements Listener {
   }
 
   private void serializeMatch(Match match, JsonObject jsonObject) {
-    checkNotNull(match);
-    checkNotNull(jsonObject);
+    assertNotNull(match);
+    assertNotNull(jsonObject);
 
     jsonObject.addProperty("state", match.getPhase().toString());
     jsonObject.addProperty("duration", match.getDuration().getSeconds());
@@ -121,7 +115,7 @@ public class ServerPingDataListener implements Listener {
   }
 
   private void appendNextMap(JsonObject jsonObject) {
-    checkNotNull(jsonObject);
+    assertNotNull(jsonObject);
 
     MapInfo nextMap = mapOrder.getNextMap();
 
@@ -133,8 +127,8 @@ public class ServerPingDataListener implements Listener {
   }
 
   private void serializeMap(MapInfo map, JsonObject jsonObject) {
-    checkNotNull(map);
-    checkNotNull(jsonObject);
+    assertNotNull(map);
+    assertNotNull(jsonObject);
 
     jsonObject.addProperty("id", map.getId());
     jsonObject.addProperty("name", map.getName());
@@ -171,8 +165,8 @@ public class ServerPingDataListener implements Listener {
   }
 
   private void serializeContributor(Contributor contributor, JsonObject jsonObject) {
-    checkNotNull(contributor, "contributor");
-    checkNotNull(jsonObject, "jsonObject");
+    assertNotNull(contributor, "contributor");
+    assertNotNull(jsonObject, "jsonObject");
 
     jsonObject.addProperty("name", contributor.getNameLegacy());
     if (contributor instanceof PlayerContributor) {

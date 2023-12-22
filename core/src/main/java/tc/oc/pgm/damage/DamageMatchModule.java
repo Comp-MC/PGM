@@ -1,9 +1,8 @@
 package tc.oc.pgm.damage;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static tc.oc.pgm.util.Assert.assertNotNull;
 
 import java.util.List;
-import javax.annotation.Nullable;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.ExperienceOrb;
@@ -20,6 +19,7 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.event.entity.PotionSplashEvent;
 import org.bukkit.event.vehicle.VehicleDamageEvent;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.filter.Filter;
 import tc.oc.pgm.api.filter.query.DamageQuery;
 import tc.oc.pgm.api.filter.query.Query;
@@ -33,6 +33,7 @@ import tc.oc.pgm.api.tracker.info.DamageInfo;
 import tc.oc.pgm.api.tracker.info.FallInfo;
 import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.tracker.TrackerMatchModule;
+import tc.oc.pgm.tracker.info.BlockInfo;
 import tc.oc.pgm.tracker.info.EntityInfo;
 import tc.oc.pgm.tracker.info.ExplosionInfo;
 import tc.oc.pgm.tracker.info.FireInfo;
@@ -78,6 +79,7 @@ public class DamageMatchModule implements MatchModule, Listener {
     return damageInfo instanceof ExplosionInfo
         || damageInfo instanceof FireInfo
         || damageInfo instanceof FallInfo
+        || damageInfo instanceof BlockInfo
         || damageInfo
             instanceof
             GenericDamageInfo; // This should never have an attacker anyway, but just in case
@@ -92,7 +94,7 @@ public class DamageMatchModule implements MatchModule, Listener {
         }
 
       case ALLY:
-        if (!isAllowedTeamDamage(damageInfo)) {
+        if (!match.getFriendlyFire() && !isAllowedTeamDamage(damageInfo)) {
           return Filter.QueryResponse.DENY;
         }
 
@@ -149,7 +151,7 @@ public class DamageMatchModule implements MatchModule, Listener {
   /** Query the given damage event and cancel it if the result was denied. */
   public Filter.QueryResponse processDamageEvent(
       Cancellable event, ParticipantState victim, DamageInfo damageInfo) {
-    Filter.QueryResponse response = queryDamage(checkNotNull(event), victim, damageInfo);
+    Filter.QueryResponse response = queryDamage(assertNotNull(event), victim, damageInfo);
     if (response.isDenied()) {
       event.setCancelled(true);
     }

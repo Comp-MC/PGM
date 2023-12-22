@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import net.kyori.adventure.sound.Sound;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import tc.oc.pgm.api.match.Match;
@@ -31,7 +32,6 @@ import tc.oc.pgm.goals.events.GoalProximityChangeEvent;
 import tc.oc.pgm.goals.events.GoalStatusChangeEvent;
 import tc.oc.pgm.goals.events.GoalTouchEvent;
 import tc.oc.pgm.teams.TeamMatchModule;
-import tc.oc.pgm.util.chat.Sound;
 
 @ListenerScope(MatchScope.LOADED)
 public class GoalMatchModule implements MatchModule, Listener {
@@ -47,9 +47,6 @@ public class GoalMatchModule implements MatchModule, Listener {
       return new GoalMatchModule(match);
     }
   }
-
-  protected static final Sound GOOD_SOUND = new Sound("portal.travel", 0.7f, 2f);
-  protected static final Sound BAD_SOUND = new Sound("mob.blaze.death", 0.8f, 0.8f);
 
   protected final Match match;
   protected final List<Goal> goals = new ArrayList<>();
@@ -84,7 +81,7 @@ public class GoalMatchModule implements MatchModule, Listener {
   public void addGoal(Goal<?> goal) {
     match.getLogger().fine("Adding goal " + goal);
 
-    if (!goal.isVisible()) return;
+    if (!goal.hasShowOption(ShowOption.STATS)) return;
 
     if (goals.isEmpty()) {
       match
@@ -150,7 +147,9 @@ public class GoalMatchModule implements MatchModule, Listener {
     for (Competitor competitor : competitorsByGoal.get(goal)) {
       progressByCompetitor.put(competitor, new GoalProgress(competitor));
     }
-    match.calculateVictory();
+
+    // Forces team rankings to be invalidated
+    match.getWinners();
   }
 
   // TODO: These events will often be fired together.. debounce them somehow?
@@ -161,17 +160,19 @@ public class GoalMatchModule implements MatchModule, Listener {
 
     // Don't play the objective sound if the match is over, because the win/lose sound will play
     // instead
-    if (!match.calculateVictory() && event.getGoal().isVisible()) {
+    if (!match.calculateVictory() && event.getGoal().hasShowOption(ShowOption.SHOW_EFFECTS)) {
+      Sound goodSound = event.getGoal().getCompletionSound(true);
+      Sound badSound = event.getGoal().getCompletionSound(false);
+
       for (MatchPlayer player : event.getMatch().getPlayers()) {
+        if (!player.getSettings().getValue(SettingKey.SOUNDS).equals(SettingValue.SOUNDS_ALL))
+          continue;
+
         if (player.getParty() instanceof Competitor
             && event.isGood() != (event.getCompetitor() == player.getParty())) {
-          if (player.getSettings().getValue(SettingKey.SOUNDS).equals(SettingValue.SOUNDS_ALL)) {
-            player.playSound(BAD_SOUND);
-          }
+          if (badSound != null) player.playSound(badSound);
         } else {
-          if (player.getSettings().getValue(SettingKey.SOUNDS).equals(SettingValue.SOUNDS_ALL)) {
-            player.playSound(GOOD_SOUND);
-          }
+          if (goodSound != null) player.playSound(goodSound);
         }
       }
     }

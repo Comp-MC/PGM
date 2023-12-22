@@ -4,20 +4,20 @@ import com.google.common.collect.ImmutableList;
 import java.util.Collection;
 import java.util.logging.Logger;
 import org.jdom2.Document;
+import tc.oc.pgm.api.map.Gamemode;
 import tc.oc.pgm.api.map.MapModule;
 import tc.oc.pgm.api.map.MapTag;
 import tc.oc.pgm.api.map.factory.MapFactory;
 import tc.oc.pgm.api.map.factory.MapModuleFactory;
 import tc.oc.pgm.api.match.Match;
-import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.util.xml.InvalidXMLException;
 
-public class RageModule implements MapModule {
+public class RageModule implements MapModule<RageMatchModule> {
   private static final Collection<MapTag> TAGS =
-      ImmutableList.of(MapTag.create("rage", "Rage", true, true));
+      ImmutableList.of(new MapTag("rage", Gamemode.RAGE, true));
 
   @Override
-  public MatchModule createMatchModule(Match match) {
+  public RageMatchModule createMatchModule(Match match) {
     return new RageMatchModule(match);
   }
 

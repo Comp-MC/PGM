@@ -1,108 +1,84 @@
 package tc.oc.pgm.command;
 
-import app.ashcon.intake.Command;
-import app.ashcon.intake.parametric.annotation.Text;
-import javax.annotation.Nullable;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.format.TextColor;
-import net.kyori.text.format.TextDecoration;
-import org.bukkit.ChatColor;
-import tc.oc.pgm.api.match.Match;
+import static net.kyori.adventure.text.Component.space;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+
+import cloud.commandframework.annotations.Argument;
+import cloud.commandframework.annotations.CommandDescription;
+import cloud.commandframework.annotations.CommandMethod;
+import cloud.commandframework.annotations.specifier.Greedy;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.classes.ClassMatchModule;
 import tc.oc.pgm.classes.PlayerClass;
-import tc.oc.pgm.util.LegacyFormatUtils;
-import tc.oc.pgm.util.StringUtils;
-import tc.oc.pgm.util.text.TextException;
-import tc.oc.pgm.util.text.TextTranslations;
+import tc.oc.pgm.util.text.TextFormatter;
 
 public final class ClassCommand {
 
-  @Command(
-      aliases = {"class", "selectclass", "c", "cl"},
-      desc = "Select your class")
-  public void classSelect(Match match, MatchPlayer player, @Nullable @Text String query) {
-    final ClassMatchModule classes = getClasses(match);
+  @CommandMethod("class|selectclass|c|cl [class]")
+  @CommandDescription("Select your class")
+  public void classSelect(
+      ClassMatchModule classes,
+      MatchPlayer player,
+      @Argument("class") @Greedy PlayerClass newClass) {
     final PlayerClass currentClass = classes.getSelectedClass(player.getId());
 
-    if (query == null) {
+    if (newClass == null) {
       player.sendMessage(
-          TranslatableComponent.of("match.class.current", TextColor.GREEN)
-              .append(TextComponent.space())
-              .append(
-                  TextComponent.of(currentClass.getName(), TextColor.GOLD, TextDecoration.BOLD)));
-      player.sendMessage(TranslatableComponent.of("match.class.view", TextColor.GOLD));
+          translatable("match.class.current", NamedTextColor.GREEN)
+              .append(space())
+              .append(text(currentClass.getName(), NamedTextColor.GOLD, TextDecoration.BOLD)));
+      player.sendMessage(translatable("match.class.view", NamedTextColor.GOLD));
     } else {
-      final PlayerClass newClass = StringUtils.bestFuzzyMatch(query, classes.getClasses(), 0.9);
-
-      if (newClass == null) {
-        throw TextException.of("match.class.notFound");
-      }
-
-      try {
-        classes.setPlayerClass(player.getId(), newClass);
-      } catch (IllegalStateException e) {
-        throw TextException.of("match.class.sticky");
-      }
+      classes.setPlayerClass(player.getId(), newClass);
 
       player.sendMessage(
-          TranslatableComponent.of(
+          translatable(
               "match.class.ok",
-              TextColor.GREEN,
-              TextComponent.of(newClass.getName(), TextColor.GOLD, TextDecoration.UNDERLINED)));
+              NamedTextColor.GREEN,
+              text(newClass.getName(), NamedTextColor.GOLD, TextDecoration.UNDERLINED)));
       if (player.isParticipating()) {
-        player.sendMessage(TranslatableComponent.of("match.class.queue", TextColor.GREEN));
+        player.sendMessage(translatable("match.class.queue", NamedTextColor.GREEN));
       }
     }
   }
 
-  @Command(
-      aliases = {"classlist", "classes", "listclasses", "cls"},
-      desc = "List all available classes")
-  public void classList(Match match, MatchPlayer player) {
-    final ClassMatchModule classes = getClasses(match);
+  @CommandMethod("classlist|classes|listclasses|cls")
+  @CommandDescription("List all available classes")
+  public void classList(ClassMatchModule classes, MatchPlayer player) {
     final PlayerClass currentClass = classes.getSelectedClass(player.getId());
 
     player.sendMessage(
-        LegacyFormatUtils.dashedChatMessage(
-            ChatColor.GOLD + TextTranslations.translate("match.class.title", player.getBukkit()),
-            "-",
-            ChatColor.RED.toString()));
+        TextFormatter.horizontalLineHeading(
+            player.getBukkit(),
+            translatable("match.class.title").color(NamedTextColor.GOLD),
+            NamedTextColor.RED));
+
     int i = 1;
     for (PlayerClass cls : classes.getClasses()) {
-      StringBuilder result = new StringBuilder();
+      TextComponent.Builder result = text().append(text(i++ + ". "));
 
-      result.append(i++).append(". ");
+      NamedTextColor color;
 
       if (cls == currentClass) {
-        result.append(ChatColor.GOLD);
+        color = NamedTextColor.GOLD;
       } else if (cls.canUse(player.getBukkit())) {
-        result.append(ChatColor.GREEN);
+        color = NamedTextColor.GREEN;
       } else {
-        result.append(ChatColor.RED);
+        color = NamedTextColor.RED;
       }
 
-      if (cls == currentClass) result.append(ChatColor.UNDERLINE);
-      result.append(cls.getName());
+      result.append(
+          text(cls.getName(), color).decoration(TextDecoration.UNDERLINED, cls == currentClass));
 
       if (cls.getDescription() != null) {
-        result
-            .append(ChatColor.DARK_PURPLE)
-            .append(" - ")
-            .append(ChatColor.RESET)
-            .append(cls.getDescription());
+        result.append(text(" - ", NamedTextColor.DARK_PURPLE)).append(text(cls.getDescription()));
       }
 
-      player.sendMessage(result.toString());
+      player.sendMessage(result.build());
     }
-  }
-
-  private ClassMatchModule getClasses(Match match) {
-    final ClassMatchModule classes = match.getModule(ClassMatchModule.class);
-    if (classes == null) {
-      throw TextException.of("match.class.notEnabled");
-    }
-    return classes;
   }
 }

@@ -4,7 +4,6 @@ import java.util.logging.Logger;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.PotionEffectRemoveEvent;
 import org.bukkit.potion.PotionEffectType;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.Tickable;
@@ -12,6 +11,7 @@ import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.time.Tick;
 import tc.oc.pgm.util.ClassLogger;
 import tc.oc.pgm.util.TimeUtils;
+import tc.oc.pgm.util.event.entity.PotionEffectRemoveEvent;
 import tc.oc.pgm.util.nms.NMSHacks;
 
 public class ShieldPlayerModule implements Tickable {
@@ -56,6 +56,16 @@ public class ShieldPlayerModule implements Tickable {
     addAbsorption(-shieldHealth);
   }
 
+  static Sound RECHARGE_SOUND = resolveRechaseSound();
+
+  static Sound resolveRechaseSound() {
+    try {
+      return Sound.ORB_PICKUP;
+    } catch (Throwable t) {
+      return Sound.valueOf("ENTITY_EXPERIENCE_ORB_PICKUP");
+    }
+  }
+
   /**
    * Recharge the shield to its maximum health. If the player has more absorption than the current
    * shield strength, the excess is preserved.
@@ -66,7 +76,7 @@ public class ShieldPlayerModule implements Tickable {
       logger.fine("Recharging shield: shield=" + shieldHealth + " delta=" + delta);
       shieldHealth = parameters.maxHealth;
       addAbsorption(delta);
-      bukkit.playSound(bukkit.getLocation(), Sound.ORB_PICKUP, 1, 2);
+      bukkit.playSound(bukkit.getLocation(), RECHARGE_SOUND, 1, 2);
     }
   }
 

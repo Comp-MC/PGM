@@ -1,18 +1,22 @@
 package tc.oc.pgm.api;
 
+import static net.kyori.adventure.text.Component.newline;
+import static net.kyori.adventure.text.Component.text;
+import static net.kyori.adventure.text.Component.translatable;
+import static net.kyori.adventure.text.event.ClickEvent.openUrl;
+import static net.kyori.adventure.text.event.HoverEvent.showText;
+
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
-import javax.annotation.Nullable;
-import net.kyori.text.Component;
-import net.kyori.text.TextComponent;
-import net.kyori.text.TranslatableComponent;
-import net.kyori.text.event.ClickEvent;
-import net.kyori.text.event.HoverEvent;
-import net.kyori.text.format.TextColor;
-import net.kyori.text.format.TextDecoration;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.permissions.Permission;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.map.factory.MapSourceFactory;
 
 /** A configuration for server owners to modify {@link PGM}. */
@@ -55,7 +59,18 @@ public interface Config {
    * @return A path to a map pool, or null for no map pools.
    */
   @Nullable
-  String getMapPoolFile();
+  Path getMapPoolFile();
+
+  /**
+   * Gets a path to the includes directory.
+   *
+   * @return A path to the includes directory, or null for none.
+   */
+  @Nullable
+  Path getIncludesDirectory();
+
+  /** @return If unused XML tags should be reported or ignored */
+  boolean showUnusedXml();
 
   /**
    * Gets a duration to wait before starting a match.
@@ -77,6 +92,13 @@ public interface Config {
    * @return A duration, if zero then cycles immediately, if negative does not auto-cycle.
    */
   Duration getCycleTime();
+
+  /**
+   * Gets a duration to wait before restarting the server.
+   *
+   * @return A duration.
+   */
+  Duration getRestartTime();
 
   /**
    * Gets a duration to wait before the server should restart.
@@ -190,6 +212,13 @@ public interface Config {
   boolean showTabList();
 
   /**
+   * Gets whether the tab list should be resized to 4 rows for 1.7 players.
+   *
+   * @return If the tab list will be resized.
+   */
+  boolean resizeTabList();
+
+  /**
    * Gets whether the tab list is should show real ping.
    *
    * @return If the tab list should show real ping.
@@ -219,6 +248,25 @@ public interface Config {
   boolean useLegacyFlagBeams();
 
   /**
+   * Gets whether to show a more verbose representation of the match stats at the end of each match
+   *
+   * @return If verbose stats at the end of the match is enabled
+   */
+  boolean showVerboseStats();
+
+  /** @return How many ticks should wait until showing stats */
+  Duration showStatsAfter();
+
+  /** @return If stats on match end should shown high scores */
+  boolean showBestStats();
+
+  /** @return If stats on match end should show your own stats */
+  boolean showOwnStats();
+
+  /** @return The slot where the verbose item will be placed */
+  int getVerboseItemSlot();
+
+  /**
    * Gets a format to override the server's "message of the day."
    *
    * <p>{0} = The existing MoTD.
@@ -238,13 +286,6 @@ public interface Config {
    * @return If wool auto refill is enabled.
    */
   boolean shouldRefillWool();
-
-  /**
-   * Gets whether to show a more verbose representation of the match stats at the end of each match
-   *
-   * @return If verbose stats at the end of the match is enabled
-   */
-  boolean showVerboseStats();
 
   /**
    * Gets at which score players should be no longer allowed to keep playing TDM
@@ -339,36 +380,36 @@ public interface Config {
       if (prefix ? getPrefixOverride() != null : getSuffixOverride() != null) {
         return prefix ? getPrefixOverride() : getSuffixOverride();
       }
-      TextComponent.Builder hover = TextComponent.builder();
+      TextComponent.Builder hover = text();
       boolean addNewline = false;
       if (getDisplayName() != null && !getDisplayName().isEmpty()) {
         addNewline = true;
-        hover.append(getDisplayName());
+        hover.append(text(getDisplayName()));
       }
       if (getDescription() != null && !getDescription().isEmpty()) {
-        if (addNewline) hover.append(TextComponent.newline());
+        if (addNewline) hover.append(newline());
         addNewline = true;
-        hover.append(getDescription());
+        hover.append(text(getDescription()));
       }
 
       if (getClickLink() != null && !getClickLink().isEmpty()) {
-        if (addNewline) hover.append(TextComponent.newline());
+        if (addNewline) hover.append(newline());
 
         Component clickLink =
-            TranslatableComponent.of(
+            translatable(
                 "chat.clickLink",
-                TextColor.DARK_AQUA,
-                TextComponent.of(getClickLink(), TextColor.AQUA, TextDecoration.UNDERLINED));
+                NamedTextColor.DARK_AQUA,
+                text(getClickLink(), NamedTextColor.AQUA, TextDecoration.UNDERLINED));
         hover.append(clickLink);
       }
 
       TextComponent.Builder component =
-          TextComponent.builder()
-              .append(prefix ? getPrefix() : getSuffix())
-              .hoverEvent(HoverEvent.showText(hover.build()));
+          text()
+              .append(text(prefix ? getPrefix() : getSuffix()))
+              .hoverEvent(showText(hover.build()));
 
       if (getClickLink() != null && !getClickLink().isEmpty()) {
-        component.clickEvent(ClickEvent.openUrl(getClickLink()));
+        component.clickEvent(openUrl(getClickLink()));
       }
 
       return component.build();
@@ -376,13 +417,14 @@ public interface Config {
   }
 
   /**
-   * Gets whether "community mode" should be installed if not present.
+   * Gets whether a simple vanish manager should be installed.
    *
-   * <p>Includes features such as /report, /warn, /freeze, and more.
+   * <p>Allows for basic usage of /vanish. If you wish to allow third-party plugins to hook-in
+   * disable this
    *
-   * @return If community mode is enabled.
+   * @return If vanish is enabled.
    */
-  boolean isCommunityMode();
+  boolean isVanishEnabled();
 
   /**
    * Gets experimental configuration settings that are not yet stable.
@@ -390,4 +432,9 @@ public interface Config {
    * @return A map of experimental settings.
    */
   Map<String, Object> getExperiments();
+
+  default boolean getExperimentAsBool(String key, boolean def) {
+    Object exp = getExperiments().getOrDefault(key, def);
+    return exp instanceof Boolean ? (Boolean) exp : exp.toString().equals("true");
+  }
 }

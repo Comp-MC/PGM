@@ -2,7 +2,6 @@ package tc.oc.pgm.regions;
 
 import static tc.oc.pgm.api.map.MapProtos.REGION_PRIORITY_VERSION;
 
-import javax.annotation.Nullable;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -30,9 +29,8 @@ import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.util.Vector;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.event.BlockTransformEvent;
-import tc.oc.pgm.api.event.CoarsePlayerMoveEvent;
-import tc.oc.pgm.api.event.GeneralizingEvent;
 import tc.oc.pgm.api.filter.Filter.QueryResponse;
 import tc.oc.pgm.api.filter.query.BlockQuery;
 import tc.oc.pgm.api.filter.query.PlayerQuery;
@@ -51,6 +49,9 @@ import tc.oc.pgm.flag.event.FlagPickupEvent;
 import tc.oc.pgm.util.MatchPlayers;
 import tc.oc.pgm.util.block.BlockStates;
 import tc.oc.pgm.util.block.BlockVectors;
+import tc.oc.pgm.util.event.GeneralizedEvent;
+import tc.oc.pgm.util.event.PlayerCoarseMoveEvent;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 @ListenerScope(MatchScope.LOADED)
 public class RegionMatchModule implements MatchModule, Listener {
@@ -59,10 +60,21 @@ public class RegionMatchModule implements MatchModule, Listener {
   private final RFAContext rfaContext;
   private final boolean useRegionPriority;
 
-  public RegionMatchModule(Match match, RFAContext rfaContext) {
+  private Integer maxBuildHeight;
+
+  public RegionMatchModule(Match match, RFAContext rfaContext, Integer maxBuildHeight) {
     this.match = match;
     this.rfaContext = rfaContext;
     this.useRegionPriority = match.getMap().getProto().isNoOlderThan(REGION_PRIORITY_VERSION);
+    this.maxBuildHeight = maxBuildHeight;
+  }
+
+  public Integer getMaxBuildHeight() {
+    return maxBuildHeight;
+  }
+
+  public void setMaxBuildHeight(Integer maxBuildHeight) {
+    this.maxBuildHeight = maxBuildHeight;
   }
 
   protected void checkEnterLeave(
@@ -109,7 +121,7 @@ public class RegionMatchModule implements MatchModule, Listener {
   }
 
   @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-  public void checkEnterLeave(final CoarsePlayerMoveEvent event) {
+  public void checkEnterLeave(final PlayerCoarseMoveEvent event) {
     this.checkEnterLeave(
         event, this.match.getPlayer(event.getPlayer()), event.getBlockFrom(), event.getBlockTo());
   }
@@ -121,7 +133,7 @@ public class RegionMatchModule implements MatchModule, Listener {
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void applyEffects(final CoarsePlayerMoveEvent event) {
+  public void applyEffects(final PlayerCoarseMoveEvent event) {
     MatchPlayer player = this.match.getPlayer(event.getPlayer());
     if (player == null) return;
 
@@ -142,7 +154,7 @@ public class RegionMatchModule implements MatchModule, Listener {
         // Note: works on observers
         if (enters && rfa.velocity != null) {
           event.getPlayer().setVelocity(rfa.velocity);
-          event.getPlayer().updateVelocity();
+          NMSHacks.updateVelocity(event.getPlayer());
         }
 
         if (rfa.kit != null && player.canInteract()) {
@@ -259,13 +271,10 @@ public class RegionMatchModule implements MatchModule, Listener {
   @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
   public void checkUse(final PlayerInteractEvent event) {
     if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
-      MatchPlayer player = this.match.getParticipant(event.getPlayer());
-      if (player == null) return;
-
       Block block = event.getClickedBlock();
       if (block == null) return;
 
-      this.handleUse(event, block.getState(), player);
+      this.handleUse(event, block.getState(), this.match.getParticipant(event.getPlayer()));
     }
   }
 
@@ -309,8 +318,8 @@ public class RegionMatchModule implements MatchModule, Listener {
     }
   }
 
-  private void handleUse(Event event, BlockState blockState, MatchPlayer player) {
-    if (!player.canInteract()) return;
+  private void handleUse(Event event, BlockState blockState, @Nullable MatchPlayer player) {
+    if (!MatchPlayers.canInteract(player)) return;
 
     PlayerBlockQuery query = new PlayerBlockQuery(event, player, blockState);
 
@@ -371,7 +380,7 @@ public class RegionMatchModule implements MatchModule, Listener {
         && ((Cancellable) query.getEvent()).isCancelled()
         && query instanceof PlayerQuery) {
 
-      MatchPlayer player = match.getPlayer(((PlayerQuery) query).getPlayerId());
+      MatchPlayer player = ((PlayerQuery) query).getPlayer();
       if (player != null) player.sendWarning(rfa.message);
     }
   }
@@ -432,8 +441,8 @@ public class RegionMatchModule implements MatchModule, Listener {
         return true;
 
       case DENY:
-        if (query.getEvent() instanceof GeneralizingEvent) {
-          ((GeneralizingEvent) query.getEvent()).setCancelled(true, rfa.message);
+        if (query.getEvent() instanceof GeneralizedEvent) {
+          ((GeneralizedEvent) query.getEvent()).setCancelled(rfa.message);
         } else if (query.getEvent() instanceof Cancellable) {
           ((Cancellable) query.getEvent()).setCancelled(true);
         }

@@ -1,15 +1,14 @@
 package tc.oc.pgm.util.tablist;
 
+import static net.kyori.adventure.text.Component.text;
+
 import java.util.UUID;
-import javax.annotation.Nullable;
-import net.md_5.bungee.api.chat.BaseComponent;
-import org.bukkit.Skin;
+import java.util.function.Function;
+import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
-import org.bukkit.event.player.PlayerSkinPartsChangeEvent;
-import tc.oc.pgm.util.named.NameStyle;
+import tc.oc.pgm.util.event.player.PlayerSkinPartsChangeEvent;
 import tc.oc.pgm.util.nms.NMSHacks;
-import tc.oc.pgm.util.text.TextTranslations;
-import tc.oc.pgm.util.text.types.PlayerComponent;
+import tc.oc.pgm.util.skin.Skin;
 
 /**
  * {@link TabEntry} showing a {@link Player}'s name and skin.
@@ -21,6 +20,11 @@ import tc.oc.pgm.util.text.types.PlayerComponent;
 public class PlayerTabEntry extends DynamicTabEntry {
 
   private static boolean showPing = false;
+  private static Function<Player, Component> playerComponent = p -> text(p.getName());
+
+  public static void setPlayerComponent(Function<Player, Component> playerComponent) {
+    PlayerTabEntry.playerComponent = playerComponent;
+  }
 
   public static void setShowRealPing(boolean showPing) {
     PlayerTabEntry.showPing = showPing;
@@ -51,9 +55,8 @@ public class PlayerTabEntry extends DynamicTabEntry {
   }
 
   @Override
-  public BaseComponent[] getContent(TabView view) {
-    return TextTranslations.toBaseComponentArray(
-        PlayerComponent.of(player, NameStyle.TAB, view.getViewer()), view.getViewer());
+  public Component getContent(TabView view) {
+    return playerComponent.apply(player);
   }
 
   @Override
@@ -67,8 +70,14 @@ public class PlayerTabEntry extends DynamicTabEntry {
   }
 
   @Override
-  public @Nullable Skin getSkin(TabView view) {
-    return this.player.getSkin();
+  public Skin getSkin(TabView view) {
+    Player viewer = view.getViewer();
+    if (viewer == null) {
+      return null;
+    }
+
+    // TODO: find different solution for non-SportPaper servers
+    return NMSHacks.getPlayerSkinForViewer(player, viewer);
   }
 
   @Override

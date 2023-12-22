@@ -2,7 +2,6 @@ package tc.oc.pgm.doublejump;
 
 import java.util.Iterator;
 import java.util.Map;
-import javax.annotation.Nullable;
 import org.bukkit.GameMode;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
@@ -12,6 +11,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
 import org.bukkit.util.Vector;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
@@ -65,6 +65,7 @@ public class DoubleJumpMatchModule implements MatchModule, Listener, Tickable {
       iterator.remove();
       this.refreshJump(player);
     }
+    this.jumpers.disable();
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -84,6 +85,7 @@ public class DoubleJumpMatchModule implements MatchModule, Listener, Tickable {
       this.setCharge(jumper, 1f);
     } else {
       this.jumpers.remove(player);
+      this.removeCharge(player);
       this.refreshJump(player);
     }
   }
@@ -119,6 +121,10 @@ public class DoubleJumpMatchModule implements MatchModule, Listener, Tickable {
         jumper.player.setExp(jumper.charge);
       }
     }
+  }
+
+  private void removeCharge(Player player) {
+    player.setExp(0f);
   }
 
   private void refreshJump(Player player) {

@@ -1,11 +1,14 @@
 package tc.oc.pgm.destroyable;
 
+import com.google.common.collect.ImmutableSet;
 import java.util.Set;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.feature.FeatureInfo;
 import tc.oc.pgm.api.region.Region;
 import tc.oc.pgm.goals.ProximityGoalDefinition;
 import tc.oc.pgm.goals.ProximityMetric;
+import tc.oc.pgm.goals.ShowOptions;
+import tc.oc.pgm.modes.Mode;
 import tc.oc.pgm.teams.TeamFactory;
 import tc.oc.pgm.util.material.matcher.SingleMaterialMatcher;
 
@@ -14,35 +17,33 @@ public class DestroyableFactory extends ProximityGoalDefinition {
   protected final Region region;
   protected final Set<SingleMaterialMatcher> materials;
   protected final double destructionRequired;
-  protected final boolean modeChanges;
+  protected final ImmutableSet<Mode> modeList;
   protected final boolean showProgress;
   protected final boolean sparks;
   protected final boolean repairable;
-  protected final boolean visible;
 
   public DestroyableFactory(
       @Nullable String id,
       String name,
       @Nullable Boolean required,
-      boolean visible,
+      ShowOptions showOptions,
       TeamFactory owner,
       ProximityMetric proximityMetric,
       Region region,
       Set<SingleMaterialMatcher> materials,
       double destructionRequired,
-      boolean modeChanges,
+      @Nullable ImmutableSet<Mode> modeList,
       boolean showProgress,
       boolean sparks,
       boolean repairable) {
-    super(id, name, required, visible, owner, proximityMetric);
+    super(id, name, required, showOptions, owner, proximityMetric);
     this.region = region;
     this.materials = materials;
     this.destructionRequired = destructionRequired;
-    this.modeChanges = modeChanges;
+    this.modeList = modeList;
     this.showProgress = showProgress;
     this.sparks = sparks;
     this.repairable = repairable;
-    this.visible = visible;
   }
 
   public Region getRegion() {
@@ -53,12 +54,12 @@ public class DestroyableFactory extends ProximityGoalDefinition {
     return this.materials;
   }
 
-  public double getDestructionRequired() {
-    return this.destructionRequired;
+  public ImmutableSet<Mode> getModes() {
+    return this.modeList;
   }
 
-  public boolean hasModeChanges() {
-    return this.modeChanges;
+  public double getDestructionRequired() {
+    return this.destructionRequired;
   }
 
   public boolean getShowProgress() {

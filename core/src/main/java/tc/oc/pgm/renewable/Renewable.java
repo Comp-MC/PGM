@@ -30,6 +30,7 @@ import tc.oc.pgm.util.block.BlockVectorSet;
 import tc.oc.pgm.util.block.BlockVectors;
 import tc.oc.pgm.util.material.MaterialCounter;
 import tc.oc.pgm.util.material.Materials;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 public class Renewable implements Listener, Tickable {
 
@@ -160,7 +161,7 @@ public class Renewable implements Listener, Tickable {
     if (!isOriginalRenewable(pos)) return true;
 
     // If original and current world are both shuffleable, block is new
-    MaterialData currentMaterial = currentState.getMaterialData();
+    MaterialData currentMaterial = currentState.getData();
     if (isOriginalShuffleable(pos)
         && definition.shuffleableBlocks.query(new BlockQuery(currentState)).isAllowed())
       return true;
@@ -218,7 +219,7 @@ public class Renewable implements Listener, Tickable {
                   pos.getBlockY() + random.nextInt(diameter) - range,
                   pos.getBlockZ() + random.nextInt(diameter) - range);
       if (definition.shuffleableBlocks.query(new BlockQuery(block)).isAllowed())
-        return block.getMaterialData();
+        return block.getData();
     }
     return null;
   }
@@ -266,7 +267,7 @@ public class Renewable implements Listener, Tickable {
     Location location = pos.toLocation(match.getWorld());
     Block block = location.getBlock();
     BlockState newState = location.getBlock().getState();
-    newState.setMaterialData(material);
+    NMSHacks.setBlockStateData(newState, material);
 
     BlockRenewEvent event = new BlockRenewEvent(block, newState, this);
     match.callEvent(event); // Our own handler will get this and remove the block from the pool

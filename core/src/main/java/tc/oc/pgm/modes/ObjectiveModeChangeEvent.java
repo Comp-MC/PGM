@@ -1,9 +1,10 @@
 package tc.oc.pgm.modes;
 
-import com.google.common.base.Preconditions;
+import static tc.oc.pgm.util.Assert.assertNotNull;
+
 import java.util.Collection;
-import javax.annotation.Nonnull;
 import org.bukkit.event.HandlerList;
+import org.jetbrains.annotations.NotNull;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.event.MatchEvent;
 import tc.oc.pgm.core.Core;
@@ -14,11 +15,13 @@ public class ObjectiveModeChangeEvent extends MatchEvent {
 
   private final Mode mode;
   private String name;
+  private boolean visible;
   private static final HandlerList handlers = new HandlerList();
 
   public ObjectiveModeChangeEvent(Match match, final Mode mode) {
     super(match);
     this.mode = mode;
+    this.visible = false;
 
     if (this.mode.getName() != null) {
       this.name = this.mode.getName();
@@ -42,12 +45,20 @@ public class ObjectiveModeChangeEvent extends MatchEvent {
     }
   }
 
+  public boolean isVisible() {
+    return this.visible;
+  }
+
   public final Mode getMode() {
     return this.mode;
   }
 
-  public void setName(@Nonnull String name) {
-    this.name = Preconditions.checkNotNull(name, "name");
+  public void setVisible(boolean visible) {
+    this.visible = visible;
+  }
+
+  public void setName(@NotNull String name) {
+    this.name = assertNotNull(name, "name");
   }
 
   public String getName() {

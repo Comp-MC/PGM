@@ -1,7 +1,7 @@
 package tc.oc.pgm.tracker.info;
 
-import javax.annotation.Nullable;
 import org.bukkit.Location;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.player.ParticipantState;
 import tc.oc.pgm.api.time.Tick;
@@ -28,6 +28,9 @@ public class FallState implements FallInfo {
 
   // A player's fall is cancelled if they are climbing something for more than this many ticks
   public static final long MAX_CLIMBING_TICKS = 10;
+
+  // How long players burn for after touching lava. This is a vanilla value.
+  public static final long MAX_BURNING_TICKS = 255;
 
   public final MatchPlayer victim;
   public final Location origin;
@@ -63,9 +66,9 @@ public class FallState implements FallInfo {
   public boolean isClimbing;
   public long climbingTick;
 
-  // The player's most recent in-lava state and the time it was last set true
+  // The player's most recent in-lava state and the time it was last set true and false
   public boolean isInLava;
-  public long inLavaTick;
+  public long inLavaTick, outLavaTick;
 
   // The number of times the player has touched the ground during since isFalling was set true
   public int groundTouchCount;
@@ -130,12 +133,25 @@ public class FallState implements FallInfo {
    * a ladder for MAX_CLIMBING_TICKS
    */
   public boolean isEndedSafely(Tick now) {
-    return !this.isInLava
+    return (!isInLava && now.tick - outLavaTick > MAX_BURNING_TICKS)
         && ((victim.getBukkit().isOnGround()
                 && (now.tick - onGroundTick > MAX_ON_GROUND_TICKS
                     || groundTouchCount > MAX_GROUND_TOUCHES))
             || (isSwimming && now.tick - swimmingTick > MAX_SWIMMING_TICKS)
             || (isClimbing && now.tick - climbingTick > MAX_CLIMBING_TICKS));
+  }
+
+  /**
+   * A new fall can't be initiated if the victim is already falling, unless:
+   * <li>The fall never started (i.e. they were never knocked into the air)
+   * <li>The player touched the ground at least once since the previous hit (they landed)
+   * <li>The player is not burning from this fall
+   *
+   *     <p>This function indicates if the fall is still ongoing and may not be replaced
+   */
+  public boolean isOngoing(Tick now) {
+    return (isStarted && groundTouchCount == 0)
+        || (isInLava || now.tick - outLavaTick <= MAX_BURNING_TICKS);
   }
 
   @Override

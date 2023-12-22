@@ -14,16 +14,14 @@ import tc.oc.pgm.api.map.MapTag;
 import tc.oc.pgm.api.map.factory.MapFactory;
 import tc.oc.pgm.api.map.factory.MapModuleFactory;
 import tc.oc.pgm.api.match.Match;
-import tc.oc.pgm.api.match.MatchModule;
-import tc.oc.pgm.filters.StaticFilter;
-import tc.oc.pgm.filters.TimeFilter;
+import tc.oc.pgm.filters.matcher.StaticFilter;
+import tc.oc.pgm.filters.matcher.match.MonostableFilter;
 import tc.oc.pgm.util.xml.InvalidXMLException;
 import tc.oc.pgm.util.xml.Node;
 import tc.oc.pgm.util.xml.XMLUtils;
 
-public class WorldBorderModule implements MapModule {
-  private final Collection<MapTag> TAGS =
-      ImmutableList.of(MapTag.create("border", "World Border", false, true));
+public class WorldBorderModule implements MapModule<WorldBorderMatchModule> {
+  private final Collection<MapTag> TAGS = ImmutableList.of(new MapTag("border", "World Border"));
   private final List<WorldBorder> borders;
 
   public WorldBorderModule(List<WorldBorder> borders) {
@@ -36,7 +34,7 @@ public class WorldBorderModule implements MapModule {
   }
 
   @Override
-  public MatchModule createMatchModule(Match match) {
+  public WorldBorderMatchModule createMatchModule(Match match) {
     return new WorldBorderMatchModule(match, borders);
   }
 
@@ -55,7 +53,8 @@ public class WorldBorderModule implements MapModule {
             throw new InvalidXMLException(
                 "Cannot combine a filter and an explicit time for a world border", el);
           }
-          filter = new TimeFilter(after);
+          filter = MonostableFilter.afterMatchStart(after);
+          factory.getFilters().getUsedContext().add(filter);
         }
 
         WorldBorder border =

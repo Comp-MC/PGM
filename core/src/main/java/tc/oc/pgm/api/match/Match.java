@@ -5,12 +5,13 @@ import java.util.Collection;
 import java.util.Random;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.Listener;
+import org.jetbrains.annotations.Nullable;
+import tc.oc.pgm.api.filter.query.MatchQuery;
 import tc.oc.pgm.api.map.MapInfo;
 import tc.oc.pgm.api.match.event.MatchFinishEvent;
 import tc.oc.pgm.api.match.event.MatchLoadEvent;
@@ -27,8 +28,10 @@ import tc.oc.pgm.api.player.MatchPlayerResolver;
 import tc.oc.pgm.api.time.Tick;
 import tc.oc.pgm.countdowns.CountdownContext;
 import tc.oc.pgm.features.MatchFeatureContext;
-import tc.oc.pgm.filters.query.Query;
-import tc.oc.pgm.util.chat.MultiAudience;
+import tc.oc.pgm.filters.Filterable;
+import tc.oc.pgm.join.JoinRequest;
+import tc.oc.pgm.loot.WorldTickClock;
+import tc.oc.pgm.util.Audience;
 
 /**
  * A PvP game that takes place in a {@link World} loaded with a {@link MapInfo}.
@@ -38,7 +41,12 @@ import tc.oc.pgm.util.chat.MultiAudience;
  * {@link Match}. This should allow multiple {@link Match}es to run concurrently on the same {@link
  * org.bukkit.Server}, as long as resources are cleaned up after {@link #unload()}.
  */
-public interface Match extends MatchPlayerResolver, MultiAudience, ModuleContext<MatchModule> {
+public interface Match
+    extends MatchPlayerResolver,
+        Audience,
+        ModuleContext<MatchModule>,
+        Filterable<MatchQuery>,
+        MatchQuery {
 
   /**
    * Get the global {@link Logger} for the {@link Match}.
@@ -202,6 +210,9 @@ public interface Match extends MatchPlayerResolver, MultiAudience, ModuleContext
    */
   void callEvent(Event event);
 
+  /** Get the {@link WorldTickClock} providing {@link Tick}s for this match */
+  WorldTickClock getClock();
+
   /**
    * Get a {@link Tick} that is guaranteed to return the current Minecraft server tick.
    *
@@ -329,6 +340,13 @@ public interface Match extends MatchPlayerResolver, MultiAudience, ModuleContext
   Collection<Competitor> getCompetitors();
 
   /**
+   * Get all the {@link Competitor}s in the {@link Match} ordered by closest to winning.
+   *
+   * @return All the {@link Competitor}s in closeness to winning order.
+   */
+  Collection<Competitor> getSortedCompetitors();
+
+  /**
    * Get all the currently winning {@link Competitor}s in the {@link Match}.
    *
    * @return All the winning {@link Competitor}s.
@@ -336,13 +354,28 @@ public interface Match extends MatchPlayerResolver, MultiAudience, ModuleContext
   Collection<Competitor> getWinners();
 
   /**
-   * Set or change the {@link Party} of a {@link MatchPlayer}.
+   * Set or change the {@link Party} of a {@link MatchPlayer}. Prefer {@link #setParty(MatchPlayer,
+   * Party, JoinRequest)} if you have a specific join request or want to avoid a generic force-join
    *
    * @param player The {@link MatchPlayer}.
    * @param party The new {@link Party}.
    * @return Whether the operation was a success.
    */
-  boolean setParty(MatchPlayer player, Party party);
+  default boolean setParty(MatchPlayer player, Party party) {
+    return setParty(player, party, null);
+  }
+
+  /**
+   * Set or change the {@link Party} of a {@link MatchPlayer}.
+   *
+   * @param player The {@link MatchPlayer}.
+   * @param party The new {@link Party}.
+   * @param request The {@link JoinRequest} that originated this call, and that will be passed down
+   *     resulting events. If null, it will be assumed that this is a forced join (bypassing
+   *     restrictions such as blitz).
+   * @return Whether the operation was a success.
+   */
+  boolean setParty(MatchPlayer player, Party party, @Nullable JoinRequest request);
 
   /**
    * Add a {@link Party} to the {@link Match}.
@@ -357,13 +390,6 @@ public interface Match extends MatchPlayerResolver, MultiAudience, ModuleContext
    * @param party The {@link Party} to remove.
    */
   void removeParty(Party party);
-
-  /**
-   * Get the {@link Query} associated with the {@link Match}.
-   *
-   * @return The filter {@link Query}.
-   */
-  Query getQuery();
 
   /**
    * Get the {@link Duration} of the {@link Match}, or {@link Duration#ZERO} if not yet started.
@@ -400,4 +426,23 @@ public interface Match extends MatchPlayerResolver, MultiAudience, ModuleContext
    * @return If the {@link Match} was just ended.
    */
   boolean calculateVictory();
+
+  /**
+   * Get whether friendly fire should be on or off.
+   *
+   * @return True if friendly fire is on.
+   */
+  boolean getFriendlyFire();
+
+  /**
+   * Set an override for friendly fire.
+   *
+   * @param allow True to allow, false to deny, null to reset.
+   */
+  void setFriendlyFire(Boolean allow);
+
+  @Override
+  default Match getMatch() {
+    return this;
+  }
 }

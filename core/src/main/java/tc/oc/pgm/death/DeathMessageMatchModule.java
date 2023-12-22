@@ -1,14 +1,16 @@
 package tc.oc.pgm.death;
 
 import java.util.logging.Logger;
-import net.kyori.text.Component;
-import net.kyori.text.format.TextColor;
-import net.kyori.text.format.TextDecoration;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import tc.oc.pgm.api.Permissions;
+import tc.oc.pgm.api.integration.Integration;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
@@ -23,7 +25,7 @@ public class DeathMessageMatchModule implements MatchModule, Listener {
   private final Logger logger;
 
   public DeathMessageMatchModule(Match match) {
-    logger = match.getLogger();
+    this.logger = match.getLogger();
   }
 
   @EventHandler(priority = EventPriority.LOWEST)
@@ -36,19 +38,28 @@ public class DeathMessageMatchModule implements MatchModule, Listener {
     if (!event.getMatch().isRunning()) return;
 
     DeathMessageBuilder builder = new DeathMessageBuilder(event, logger);
-    Component message = builder.getMessage().color(TextColor.GRAY);
+    Component message = builder.getMessage().color(NamedTextColor.GRAY);
 
     for (MatchPlayer viewer : event.getMatch().getPlayers()) {
       switch (viewer.getSettings().getValue(SettingKey.DEATH)) {
         case DEATH_OWN:
+          if (event.isInvolved(viewer) || event.isInvolved(viewer.getSpectatorTarget())) {
+            viewer.sendMessage(message);
+          } else if (event.isTeamKill() && viewer.getBukkit().hasPermission(Permissions.STAFF)) {
+            viewer.sendMessage(message.decoration(TextDecoration.ITALIC, true));
+          }
+          break;
+        case DEATH_FRIENDS:
           if (event.isInvolved(viewer)) {
+            viewer.sendMessage(message.decoration(TextDecoration.BOLD, true));
+          } else if (isFriendInvolved(viewer.getBukkit(), event)) {
             viewer.sendMessage(message);
           } else if (event.isTeamKill() && viewer.getBukkit().hasPermission(Permissions.STAFF)) {
             viewer.sendMessage(message.decoration(TextDecoration.ITALIC, true));
           }
           break;
         case DEATH_ALL:
-          if (event.isInvolved(viewer)) {
+          if (event.isInvolved(viewer) || event.isInvolved(viewer.getSpectatorTarget())) {
             viewer.sendMessage(message.decoration(TextDecoration.BOLD, true));
           } else {
             viewer.sendMessage(message);
@@ -56,5 +67,16 @@ public class DeathMessageMatchModule implements MatchModule, Listener {
           break;
       }
     }
+  }
+
+  private boolean isFriendInvolved(Player viewer, MatchPlayerDeathEvent event) {
+    Player killer =
+        event.getKiller() != null && event.getKiller().getPlayer().isPresent()
+            ? event.getKiller().getPlayer().get().getBukkit()
+            : null;
+    Player victim = event.getVictim().getBukkit();
+
+    return (killer != null && Integration.isFriend(viewer, killer))
+        || (victim != null && Integration.isFriend(viewer, victim));
   }
 }

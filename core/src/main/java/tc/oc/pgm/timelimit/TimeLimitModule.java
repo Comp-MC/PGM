@@ -4,10 +4,10 @@ import com.google.common.collect.ImmutableList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
 import org.jdom2.Attribute;
 import org.jdom2.Document;
 import org.jdom2.Element;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.map.MapModule;
 import tc.oc.pgm.api.map.MapProtos;
 import tc.oc.pgm.api.map.MapTag;
@@ -24,7 +24,7 @@ import tc.oc.pgm.util.xml.XMLUtils;
 
 public class TimeLimitModule implements MapModule<TimeLimitMatchModule> {
   private static final Collection<MapTag> TAGS =
-      ImmutableList.of(MapTag.create("timelimit", "Timelimit", false, true));
+      ImmutableList.of(new MapTag("timelimit", "Timelimit"));
   private final @Nullable TimeLimit timeLimit;
 
   public TimeLimitModule(@Nullable TimeLimit limit) {
@@ -45,7 +45,7 @@ public class TimeLimitModule implements MapModule<TimeLimitMatchModule> {
 
     @Nullable
     @Override
-    public Collection<Class<? extends MapModule>> getWeakDependencies() {
+    public Collection<Class<? extends MapModule<?>>> getWeakDependencies() {
       return ImmutableList.of(TeamModule.class);
     }
 
@@ -93,6 +93,7 @@ public class TimeLimitModule implements MapModule<TimeLimitMatchModule> {
           TextParser.parseDuration(el.getTextNormalize()),
           XMLUtils.parseDuration(el.getAttribute("overtime")),
           XMLUtils.parseDuration(el.getAttribute("max-overtime")),
+          XMLUtils.parseDuration(el.getAttribute("end-overtime")),
           parseVictoryCondition(factory, el.getAttribute("result")),
           XMLUtils.parseBoolean(el.getAttribute("show"), true));
     }
@@ -101,7 +102,7 @@ public class TimeLimitModule implements MapModule<TimeLimitMatchModule> {
         throws InvalidXMLException {
       if (attr == null) return null;
       try {
-        return VictoryConditions.parse(factory, attr.getValue());
+        return VictoryConditions.parseNullable(factory, attr.getValue());
       } catch (TextException e) {
         throw new InvalidXMLException(e.getLocalizedMessage(), attr);
       }

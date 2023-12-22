@@ -1,7 +1,7 @@
 package tc.oc.pgm.goals;
 
-import javax.annotation.Nullable;
 import org.jdom2.Element;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.util.xml.InvalidXMLException;
 import tc.oc.pgm.util.xml.Node;
 import tc.oc.pgm.util.xml.XMLUtils;
@@ -70,10 +70,7 @@ public class ProximityMetric {
 
     ProximityMetric.Type type =
         XMLUtils.parseEnum(
-            Node.fromAttr(el, prefix + "proximity-metric"),
-            ProximityMetric.Type.class,
-            "proximity metric",
-            def.type);
+            Node.fromAttr(el, prefix + "proximity-metric"), ProximityMetric.Type.class, def.type);
 
     // If proximity metric is none, use null proximity so that it doesn't try to get tracked nor
     // shows in the scoreboard

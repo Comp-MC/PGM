@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -28,7 +27,6 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockBurnEvent;
 import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.block.BlockFadeEvent;
-import org.bukkit.event.block.BlockFallEvent;
 import org.bukkit.event.block.BlockFormEvent;
 import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.block.BlockGrowEvent;
@@ -41,7 +39,6 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
-import org.bukkit.event.entity.ExplosionPrimeByEntityEvent;
 import org.bukkit.event.entity.ExplosionPrimeEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
@@ -53,6 +50,7 @@ import org.bukkit.material.PistonExtensionMaterial;
 import org.bukkit.plugin.EventExecutor;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.event.BlockTransformEvent;
 import tc.oc.pgm.api.match.Match;
@@ -67,7 +65,10 @@ import tc.oc.pgm.tracker.Trackers;
 import tc.oc.pgm.util.ClassLogger;
 import tc.oc.pgm.util.block.BlockStates;
 import tc.oc.pgm.util.bukkit.Events;
+import tc.oc.pgm.util.event.block.BlockFallEvent;
+import tc.oc.pgm.util.event.entity.ExplosionPrimeByEntityEvent;
 import tc.oc.pgm.util.material.Materials;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 public class BlockTransformListener implements Listener {
   private static final BlockFace[] NEIGHBORS = {
@@ -191,8 +192,8 @@ public class BlockTransformListener implements Listener {
 
   private void callEvent(final BlockTransformEvent event, boolean checked) {
     if (!checked) {
-      MaterialData oldData = event.getOldState().getMaterialData();
-      MaterialData newData = event.getNewState().getMaterialData();
+      MaterialData oldData = event.getOldState().getData();
+      MaterialData newData = event.getNewState().getData();
       if (oldData instanceof Door) {
         handleDoor(event, (Door) oldData);
       }
@@ -200,7 +201,7 @@ public class BlockTransformListener implements Listener {
         handleDoor(event, (Door) newData);
       }
     }
-    logger.fine("Generated event " + event);
+    logger.finest("Generated event " + event);
     currentEvents.put(event.getCause(), event);
   }
 
@@ -298,11 +299,28 @@ public class BlockTransformListener implements Listener {
       newState.setType(event.getBlock().getType());
       newState.setRawData(event.getBlock().getData());
 
+      // TODO: getType is deprecated getMaterial and setMaterial are SportPaper only
       // When lava flows into water, it creates stone or cobblestone
-      if (isWater(oldState.getMaterial()) && isLava(newState.getMaterial())) {
-        newState.setMaterial(
-            event.getFace() == BlockFace.DOWN ? Material.STONE : Material.COBBLESTONE);
+      if (isWater(oldState.getType()) && isLava(newState.getType())) {
+        newState.setType(event.getFace() == BlockFace.DOWN ? Material.STONE : Material.COBBLESTONE);
         newState.setRawData((byte) 0);
+      }
+
+      // For some reason, the newState has the data value of the old source.
+      // This corrects for that manually.
+      if (isWater(newState.getType()) || isLava(newState.getType())) {
+        byte oldData = newState.getRawData();
+        if (event.getFace() == BlockFace.DOWN) {
+          // A data value of 8 (or higher) represents water flowing down
+          newState.setRawData((byte) (8));
+        } else if (oldData < 7) {
+          // Data values 0-7 represent water on the ground, and increase by 1 as they spread
+          newState.setRawData((byte) (oldData + 1));
+        } else {
+          // Otherwise, the previous block must have been flowing down, so it spreads to a data
+          // value of 1
+          newState.setRawData((byte) (1));
+        }
       }
 
       // Check for lava ownership
@@ -379,7 +397,7 @@ public class BlockTransformListener implements Listener {
       if (block.getType() != Material.TNT) {
         // Don't cancel the explosion when individual blocks are cancelled
         callEvent(event, block.getState(), BlockStates.toAir(block), playerState)
-            .setPropagateCancel(false);
+            .setPropagate(false);
       }
     }
   }
@@ -471,8 +489,7 @@ public class BlockTransformListener implements Listener {
         new PistonExtensionMaterial(Material.PISTON_EXTENSION);
     pistonExtension.setFacingDirection(event.getDirection());
     BlockState pistonExtensionState = event.getBlock().getRelative(event.getDirection()).getState();
-    pistonExtensionState.setType(pistonExtension.getItemType());
-    pistonExtensionState.setData(pistonExtension);
+    NMSHacks.setBlockStateData(pistonExtensionState, pistonExtension);
     newStates.put(event.getBlock(), pistonExtensionState);
 
     this.onPistonMove(event, event.getBlocks(), newStates);
@@ -552,10 +569,12 @@ public class BlockTransformListener implements Listener {
   public void processCancelMessage(final BlockTransformEvent event) {
     if (event instanceof PlayerBlockTransformEvent
         && event.isCancelled()
-        && event.getCancelMessage() != null
+        && event.getCancellationReason() != null
         && event.isManual()) {
 
-      ((PlayerBlockTransformEvent) event).getPlayerState().sendWarning(event.getCancelMessage());
+      ((PlayerBlockTransformEvent) event)
+          .getPlayerState()
+          .sendWarning(event.getCancellationReason());
     }
   }
 

@@ -2,7 +2,7 @@ package tc.oc.pgm.teams;
 
 import static tc.oc.pgm.api.map.MapProtos.FILTER_FEATURES;
 
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.feature.FeatureReference;
 import tc.oc.pgm.api.map.MapProtos;
 import tc.oc.pgm.api.map.factory.MapFactory;
@@ -44,8 +44,9 @@ public class Teams {
     return teamFactory;
   }
 
-  public static TeamFactory getTeam(String team, Match match) {
-    return match.needModule(TeamMatchModule.class).bestFuzzyMatch(team).getInfo();
+  public static TeamFactory getTeam(String name, Match match) {
+    final Team team = match.needModule(TeamMatchModule.class).bestFuzzyMatch(name);
+    return team == null ? null : team.getInfo();
   }
 
   public static FeatureReference<TeamFactory> getTeamRef(Node node, MapFactory factory)

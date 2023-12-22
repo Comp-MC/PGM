@@ -1,12 +1,14 @@
 package tc.oc.pgm.kits;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import javax.annotation.Nullable;
 import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.Nullable;
 import tc.oc.pgm.api.filter.Filter;
 import tc.oc.pgm.api.player.MatchPlayer;
-import tc.oc.pgm.filters.StaticFilter;
+import tc.oc.pgm.filters.matcher.StaticFilter;
+import tc.oc.pgm.util.nms.NMSHacks;
 
 public class KitNode extends AbstractKit {
   private final List<Kit> kits;
@@ -22,17 +24,27 @@ public class KitNode extends AbstractKit {
     this.potionParticles = potionParticles;
   }
 
+  public static Kit of(Kit... kits) {
+    if (kits.length == 0) return EMPTY;
+    return new KitNode(Arrays.asList(kits), StaticFilter.ALLOW, null, null);
+  }
+
   @Override
   public void applyPostEvent(MatchPlayer player, boolean force, List<ItemStack> displacedItems) {
-    if (this.filter.query(player.getQuery()).isAllowed()) {
+    if (this.filter.query(player).isAllowed()) {
       for (Kit kit : this.kits) {
         kit.apply(player, this.force != null ? this.force : force, displacedItems);
       }
 
       if (this.potionParticles != null) {
-        player.getBukkit().setPotionParticles(this.potionParticles);
+        NMSHacks.setPotionParticles(player.getBukkit(), this.potionParticles);
       }
     }
+  }
+
+  @Override
+  public void applyLeftover(MatchPlayer player, List<ItemStack> leftover) {
+    for (Kit kit : this.kits) kit.applyLeftover(player, leftover);
   }
 
   @Override
@@ -44,6 +56,13 @@ public class KitNode extends AbstractKit {
   }
 
   @Override
+  public void untrigger(MatchPlayer player) {
+    for (Kit kit : kits) {
+      if (kit.isRemovable()) kit.remove(player);
+    }
+  }
+
+  @Override
   public void remove(MatchPlayer player) {
     for (Kit kit : kits) {
       kit.remove(player);
@@ -51,5 +70,5 @@ public class KitNode extends AbstractKit {
   }
 
   public static final KitNode EMPTY =
-      new KitNode(Collections.<Kit>emptyList(), StaticFilter.ALLOW, null, null);
+      new KitNode(Collections.emptyList(), StaticFilter.ALLOW, null, null);
 }

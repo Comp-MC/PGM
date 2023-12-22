@@ -1,5 +1,7 @@
 package tc.oc.pgm.api.map;
 
+import java.time.Duration;
+import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 
 /**
@@ -27,12 +29,18 @@ public interface MapOrder {
    * Forces a specific map to be played next. The underlying {@link MapOrder} may ignore this, but
    * it is recommended not to.
    *
-   * @param map The map to set next
+   * @param map The map to set next, null to reset
    */
   void setNextMap(MapInfo map);
 
-  /** Removes any map that was set manually, returning the server to what was previously chosen. */
-  void resetNextMap();
+  /**
+   * Returns the duration used for cycles in {@link CycleMatchModule}.
+   *
+   * @return The cycle duration
+   */
+  default Duration getCycleTime() {
+    return PGM.get().getConfiguration().getCycleTime();
+  }
 
   /**
    * Notify the {@link MapOrder} that a match just ended, to allow it to run actions before cycle

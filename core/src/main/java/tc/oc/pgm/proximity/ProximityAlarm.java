@@ -1,92 +1,80 @@
 package tc.oc.pgm.proximity;
 
-import com.google.common.collect.Sets;
+import static net.kyori.adventure.key.Key.key;
+import static net.kyori.adventure.sound.Sound.sound;
+import static net.kyori.adventure.text.Component.text;
+
 import java.util.HashSet;
 import java.util.Random;
 import java.util.Set;
-import org.bukkit.ChatColor;
+import net.kyori.adventure.sound.Sound;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Color;
+import org.bukkit.FireworkEffect;
 import org.bukkit.Location;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.util.Vector;
-import tc.oc.pgm.api.event.CoarsePlayerMoveEvent;
+import org.bukkit.entity.Firework;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.player.MatchPlayer;
-import tc.oc.pgm.spawns.events.ParticipantDespawnEvent;
-import tc.oc.pgm.spawns.events.ParticipantSpawnEvent;
-import tc.oc.pgm.util.chat.Sound;
+import tc.oc.pgm.controlpoint.RegionPlayerTracker;
+import tc.oc.pgm.fireworks.FireworkMatchModule;
+import tc.oc.pgm.util.nms.NMSHacks;
 
-public class ProximityAlarm implements Listener {
+public class ProximityAlarm {
   private static final long MESSAGE_INTERVAL = 5000;
   private static final float FLARE_CHANCE = 0.25f;
 
-  private static final Sound SOUND = new Sound("fireworks.largeBlast_far", 1f, 0.7f);
+  private static final Sound SOUND =
+      sound(key("fireworks.blast_far"), Sound.Source.MASTER, 1f, 0.7f);
 
   protected final Random random;
   protected final Match match;
   protected final ProximityAlarmDefinition definition;
-  protected final Set<MatchPlayer> playersInside = Sets.newHashSet();
   protected long lastMessageTime = 0;
+
+  protected final RegionPlayerTracker playerTracker;
 
   public ProximityAlarm(Match match, ProximityAlarmDefinition definition, Random random) {
     this.random = random;
     this.match = match;
     this.definition = definition;
-  }
-
-  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void onPlayerMove(final CoarsePlayerMoveEvent event) {
-    updatePlayer(this.match.getPlayer(event.getPlayer()), event.getTo());
-  }
-
-  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void onPlayerSpawn(final ParticipantSpawnEvent event) {
-    updatePlayer(event.getPlayer(), event.getPlayer().getBukkit().getLocation());
-  }
-
-  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-  public void onPlayerDespawn(final ParticipantDespawnEvent event) {
-    this.playersInside.remove(event.getPlayer());
-  }
-
-  private void updatePlayer(MatchPlayer player, Location location) {
-    if (player != null
-        && player.canInteract()
-        && this.definition.detectFilter.query(player.getQuery()).isAllowed()) {
-      if (!player.isDead() && this.definition.detectRegion.contains(location.toVector())) {
-        this.playersInside.add(player);
-      } else {
-        this.playersInside.remove(player);
-      }
-    }
+    this.playerTracker =
+        new RegionPlayerTracker(match, definition.detectRegion, definition.detectFilter);
   }
 
   public void showAlarm() {
-    if (this.random.nextFloat() < FLARE_CHANCE) {
-      if (!this.playersInside.isEmpty()) {
-        this.showFlare();
-        this.showMessage();
-      }
+    if (this.random.nextFloat() < FLARE_CHANCE && !this.playerTracker.getPlayers().isEmpty()) {
+      this.showFlare();
+      this.showMessage();
     }
   }
 
   private void showFlare() {
-    Vector pos = this.definition.detectRegion.getBounds().getCenterPoint();
-    float angle = (float) (this.random.nextFloat() * Math.PI * 2);
+    if (!definition.flares) return;
 
-    pos.add(
-        new Vector(
-            Math.sin(angle) * this.definition.flareRadius,
-            0,
-            Math.cos(angle) * this.definition.flareRadius));
+    float angle = (float) (this.random.nextFloat() * Math.PI * 2);
+    Location location =
+        this.definition
+            .detectRegion
+            .getBounds()
+            .getCenterPoint()
+            .toLocation(match.getWorld())
+            .add(
+                Math.sin(angle) * this.definition.flareRadius,
+                0,
+                Math.cos(angle) * this.definition.flareRadius);
 
     Set<Color> colors = new HashSet<>();
 
-    for (MatchPlayer player : this.playersInside) {
+    for (MatchPlayer player : this.playerTracker.getPlayers()) {
       colors.add(player.getParty().getFullColor());
     }
+
+    Firework firework =
+        FireworkMatchModule.spawnFirework(
+            location,
+            FireworkEffect.builder().with(FireworkEffect.Type.BALL).withColor(colors).build(),
+            0);
+    NMSHacks.skipFireworksLaunch(firework);
   }
 
   private void showMessage() {
@@ -99,8 +87,8 @@ public class ProximityAlarm implements Listener {
       this.lastMessageTime = now;
 
       for (MatchPlayer player : this.match.getPlayers()) {
-        if (this.definition.alertFilter.query(player.getQuery()).isAllowed()) {
-          player.sendMessage(ChatColor.RED + this.definition.alertMessage);
+        if (this.definition.alertFilter.query(player).isAllowed()) {
+          player.sendMessage(text(this.definition.alertMessage, NamedTextColor.RED));
           player.playSound(SOUND);
         }
       }
