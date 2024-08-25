@@ -4,7 +4,6 @@ import static tc.oc.pgm.util.nms.Packets.ENTITIES;
 import static tc.oc.pgm.util.platform.Supports.Variant.SPORTPAPER;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -170,19 +169,11 @@ public class NMSHacksSportPaper implements NMSHacks {
   public void resetDimension(World world) {
     var nmsWorld = ((CraftWorld) world).getHandle();
     try {
-      nmsWorld.dimension = 11;
-    } catch (IllegalAccessError e) {
-
       Field worldServerField = ReflectionUtils.getField(CraftWorld.class, "world");
-      Field dimensionField = ReflectionUtils.getField(WorldServer.class, "dimension");
-      Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-
-      try {
-        modifiersField.setInt(dimensionField, dimensionField.getModifiers() & ~Modifier.FINAL);
-        dimensionField.set(worldServerField.get(world), 11);
-      } catch (IllegalAccessException ex) {
-        // No-op, newer version of Java have disabled modifying final fields
-      }
+      app.ashcon.sportpaper.api.reflection.ReflectionUtils.modifyFinal(
+          WorldServer.class, "dimension", worldServerField.get(world), 11);
+    } catch (Exception e) {
+      // No-op, newer version of Java have disabled modifying final fields
     }
   }
 
